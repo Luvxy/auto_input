@@ -1,0 +1,14 @@
+{
+  "name": "web-automation-pc-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PC app MVP for user-configurable web automation workflows.",
+  "main": "electron/main.js",
+  "scripts": {
+    "serve": "node tools/serve.js",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.7.7"
+  }
+}

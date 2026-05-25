@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "웹 자동화 매핑 도구 MVP",
+  "version": "0.1.0",
+  "description": "웹 요소를 선택해 PC 앱 MVP로 보내는 크롬 확장프로그램 프로토타입입니다.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>", "http://localhost:4173/*", "ws://localhost:4173/*"],
+  "action": {
+    "default_title": "자동화 매핑",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

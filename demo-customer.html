@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>예시 고객 등록 사이트</title>
+    <style>
+      :root {
+        --bg: #f4f6f8;
+        --surface: #ffffff;
+        --line: #d9dee7;
+        --text: #1e2732;
+        --muted: #687385;
+        --accent: #1f7a66;
+        --accent-soft: #dff4ec;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+      }
+
+      main {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      form,
+      section {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        align-items: end;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      input {
+        min-height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 7px 10px;
+        font: inherit;
+      }
+
+      button {
+        min-height: 32px;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: var(--accent);
+        color: #ffffff;
+        cursor: pointer;
+        font: inherit;
+        padding: 0 14px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 6px;
+        text-align: left;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .flash {
+        animation: flash 520ms ease;
+      }
+
+      @keyframes flash {
+        0% {
+          background: var(--accent-soft);
+          outline: 2px solid var(--accent);
+        }
+        100% {
+          background: #ffffff;
+          outline: 0 solid transparent;
+        }
+      }
+
+      .saved-note {
+        color: var(--muted);
+        font-size: 12px;
+        margin: 0 0 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>고객 등록</h1>
+          <p>자동화 실행 결과를 눈으로 확인하는 예시 사이트입니다.</p>
+        </div>
+      </header>
+
+      <form id="customer-form">
+        <label>
+          고객명
+          <input id="customer-name" name="name" placeholder="이름" autocomplete="off" />
+        </label>
+        <label>
+          전화번호
+          <input name="phone" placeholder="010-0000-0000" autocomplete="off" />
+        </label>
+        <button class="save" type="submit">저장</button>
+      </form>
+
+      <section>
+        <p class="saved-note">저장된 고객</p>
+        <table>
+          <thead>
+            <tr>
+              <th>고객명</th>
+              <th>전화번호</th>
+            </tr>
+          </thead>
+          <tbody id="saved-customers"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const form = document.querySelector("#customer-form");
+      const tbody = document.querySelector("#saved-customers");
+
+      function addCustomer(name, phone) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${escapeHtml(name)}</td><td>${escapeHtml(phone)}</td>`;
+        tbody.prepend(row);
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = form.elements.name.value.trim();
+        const phone = form.elements.phone.value.trim();
+        if (!name || !phone) return;
+        addCustomer(name, phone);
+      });
+
+      window.demoCustomer = {
+        reset() {
+          form.reset();
+          tbody.innerHTML = "";
+        }
+      };
+    </script>
+  </body>
+</html>
