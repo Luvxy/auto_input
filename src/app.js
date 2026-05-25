@@ -1,5 +1,29 @@
 const storageKey = "web-automation-pc-mvp-state";
 
+const plans = {
+  free: {
+    id: "free",
+    name: "Free",
+    price: "0원",
+    projectLimit: 2,
+    description: "처음 자동화를 체험하는 사용자"
+  },
+  pro: {
+    id: "pro",
+    name: "Pro",
+    price: "월 4,900원",
+    projectLimit: Infinity,
+    description: "프로젝트 무제한 개인 플랜"
+  },
+  business: {
+    id: "business",
+    name: "Business",
+    price: "월 29,000원",
+    projectLimit: Infinity,
+    description: "백업, 예약 실행, 우선 지원을 위한 업무용 플랜"
+  }
+};
+
 const sampleProject = {
   id: crypto.randomUUID(),
   name: "고객 등록 자동화",
@@ -48,17 +72,31 @@ let bridgeState = {
   connected: false,
   lastMessage: "Waiting for extension"
 };
+let firebaseState = {
+  configured: false,
+  connected: false,
+  loading: true,
+  uid: "",
+  email: "",
+  displayName: "",
+  photoURL: "",
+  message: "Firebase 확인 중"
+};
 
 function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) {
-    return { projects: [sampleProject] };
+    return { plan: "free", projects: [sampleProject] };
   }
 
   try {
-    return JSON.parse(saved);
+    const parsed = JSON.parse(saved);
+    return {
+      plan: parsed.plan || "free",
+      projects: parsed.projects?.length ? parsed.projects : [sampleProject]
+    };
   } catch {
-    return { projects: [sampleProject] };
+    return { plan: "free", projects: [sampleProject] };
   }
 }
 
@@ -66,8 +104,227 @@ function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
+function isFirebaseConfigured() {
+  const config = window.firebaseConfig || window.firebaseConfig || {};
+  return Boolean(
+    window.firebase &&
+      config.apiKey &&
+      config.projectId &&
+      !String(config.apiKey).startsWith("YOUR_") &&
+      !String(config.projectId).startsWith("YOUR_")
+  );
+}
+
+async function initFirebase() {
+  if (!window.firebase && window.firebaseConfig) {
+    firebaseState = {
+      configured: true,
+      connected: false,
+      loading: false,
+      uid: "",
+      email: "",
+      displayName: "",
+      photoURL: "",
+      message: "Firebase SDK 로드 실패"
+    };
+    render();
+    return;
+  }
+
+  if (!isFirebaseConfigured()) {
+    firebaseState = {
+      configured: false,
+      connected: false,
+      loading: false,
+      uid: "",
+      email: "",
+      displayName: "",
+      photoURL: "",
+      message: "Firebase 설정 필요"
+    };
+    render();
+    return;
+  }
+
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.firebaseConfig);
+    }
+
+    firebase.auth().onAuthStateChanged(async (user) => {
+      if (!user) {
+        firebaseState = {
+          configured: true,
+          connected: false,
+          loading: false,
+          uid: "",
+          email: "",
+          displayName: "",
+          photoURL: "",
+          message: "Google 로그인이 필요합니다"
+        };
+        state.plan = "free";
+        saveState();
+        render();
+        return;
+      }
+
+      firebaseState = {
+        configured: true,
+        connected: true,
+        loading: false,
+        uid: user.uid,
+        email: user.email || "",
+        displayName: user.displayName || "",
+        photoURL: user.photoURL || "",
+        message: "Google 로그인됨"
+      };
+
+      await syncLicenseFromFirebase(user.uid);
+      render();
+    });
+
+    await firebase.auth().getRedirectResult();
+  } catch (error) {
+    firebaseState = {
+      configured: true,
+      connected: false,
+      loading: false,
+      uid: "",
+      email: "",
+      displayName: "",
+      photoURL: "",
+      message: `Firebase 오류: ${error.message}`
+    };
+    render();
+  }
+}
+
+async function signInWithGoogle() {
+  if (!isFirebaseConfigured()) {
+    firebaseState = {
+      ...firebaseState,
+      configured: false,
+      connected: false,
+      loading: false,
+      message: "Firebase 설정 필요"
+    };
+    render();
+    return;
+  }
+
+  try {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(window.firebaseConfig);
+    }
+
+    firebaseState = {
+      ...firebaseState,
+      configured: true,
+      loading: true,
+      message: "Google 로그인 중"
+    };
+    render();
+
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    try {
+      await firebase.auth().signInWithPopup(provider);
+    } catch (popupError) {
+      if (
+        popupError.code === "auth/popup-blocked" ||
+        popupError.code === "auth/popup-closed-by-user" ||
+        popupError.code === "auth/cancelled-popup-request"
+      ) {
+        firebaseState = {
+          ...firebaseState,
+          configured: true,
+          loading: true,
+          message: "Google 로그인 페이지로 이동 중"
+        };
+        render();
+        await firebase.auth().signInWithRedirect(provider);
+        return;
+      }
+
+      throw popupError;
+    }
+  } catch (error) {
+    firebaseState = {
+      ...firebaseState,
+      configured: true,
+      connected: false,
+      loading: false,
+      message: `Google 로그인 실패: ${error.message}`
+    };
+    render();
+  }
+}
+
+async function signOutGoogle() {
+  if (!window.firebase || !firebase.apps.length) return;
+  await firebase.auth().signOut();
+}
+
+async function syncLicenseFromFirebase(uid = firebaseState.uid) {
+  if (!firebaseState.connected || !uid) return;
+
+  const snapshot = await firebase.firestore().collection("licenses").doc(uid).get();
+  if (!snapshot.exists) {
+    await firebase.firestore().collection("licenses").doc(uid).set({
+      plan: state.plan || "free",
+      status: "active",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    return;
+  }
+
+  const license = snapshot.data();
+  if (license.status === "active" && plans[license.plan]) {
+    state.plan = license.plan;
+    saveState();
+  }
+}
+
+async function saveLicenseToFirebase(planId) {
+  if (!firebaseState.connected || !firebaseState.uid) return;
+
+  await firebase.firestore().collection("licenses").doc(firebaseState.uid).set(
+    {
+      plan: planId,
+      status: "active",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+}
+
 function getProject() {
   return state.projects.find((project) => project.id === selectedProjectId) || state.projects[0];
+}
+
+function getCurrentPlan() {
+  return plans[state.plan] || plans.free;
+}
+
+function canCreateProject() {
+  const plan = getCurrentPlan();
+  return state.projects.length < plan.projectLimit;
+}
+
+function projectLimitText() {
+  const plan = getCurrentPlan();
+  return Number.isFinite(plan.projectLimit) ? `${state.projects.length}/${plan.projectLimit}` : `${state.projects.length}/무제한`;
+}
+
+function shortUid() {
+  if (!firebaseState.uid) return "";
+  return `${firebaseState.uid.slice(0, 6)}...${firebaseState.uid.slice(-4)}`;
+}
+
+function accountLabel() {
+  return firebaseState.email || firebaseState.displayName || shortUid() || firebaseState.message;
 }
 
 function setProject(mutator) {
@@ -326,20 +583,93 @@ function renderHelpPage() {
   `;
 }
 
+function renderPricingPage() {
+  const currentPlan = getCurrentPlan();
+
+  return `
+    <section class="pricing-page">
+      <header class="help-hero">
+        <div>
+          <h2>요금제</h2>
+          <p>무료로 2개 프로젝트까지 써보고, 더 필요하면 월 4,900원으로 프로젝트를 무제한으로 늘릴 수 있습니다.</p>
+        </div>
+        <div class="current-plan-box">
+          <span>현재 플랜</span>
+          <strong>${currentPlan.name}</strong>
+          <small>프로젝트 ${projectLimitText()}</small>
+        </div>
+      </header>
+
+      <section class="pricing-grid">
+        <article class="pricing-card firebase-card">
+          <div>
+            <h3>Google 계정</h3>
+            <p>Google 로그인 계정의 UID를 기준으로 Firestore의 <strong>licenses/{uid}</strong> 문서와 플랜을 동기화합니다.</p>
+          </div>
+          <strong class="price">${firebaseState.connected ? "로그인됨" : "로그인 필요"}</strong>
+          <ul>
+            <li>${firebaseState.message}</li>
+            <li>${firebaseState.connected ? escapeHtml(accountLabel()) : "Google 로그인을 하면 라이선스를 확인합니다."}</li>
+            <li>결제 연동 후 서버가 이 계정의 라이선스 문서를 갱신하면 됩니다.</li>
+          </ul>
+          <div class="account-actions">
+            <button class="${firebaseState.connected ? "" : "primary"}" data-action="${firebaseState.connected ? "sync-license" : "google-login"}">
+              ${firebaseState.connected ? "라이선스 새로고침" : "Google 로그인"}
+            </button>
+            ${firebaseState.connected ? `<button data-action="google-logout">로그아웃</button>` : ""}
+          </div>
+        </article>
+        ${Object.values(plans).map((plan) => `
+          <article class="pricing-card ${plan.id === state.plan ? "active" : ""}">
+            <div>
+              <h3>${plan.name}</h3>
+              <p>${plan.description}</p>
+            </div>
+            <strong class="price">${plan.price}</strong>
+            <ul>
+              <li>${Number.isFinite(plan.projectLimit) ? `프로젝트 ${plan.projectLimit}개` : "프로젝트 무제한"}</li>
+              <li>크롬 확장프로그램 매핑</li>
+              <li>CSV 데이터 반복 실행</li>
+              ${plan.id === "business" ? "<li>백업/복원, 예약 실행, 우선 지원 예정</li>" : ""}
+            </ul>
+            <button class="${plan.id === state.plan ? "" : "primary"}" data-action="select-plan" data-plan-id="${plan.id}">
+              ${plan.id === state.plan ? "현재 사용 중" : `${plan.name} 선택`}
+            </button>
+          </article>
+        `).join("")}
+      </section>
+    </section>
+  `;
+}
+
 function render() {
   const project = getProject();
   selectedProjectId = project.id;
   selectedMappingId = selectedMappingId || project.mappings[0]?.id;
 
   document.querySelector("#app").innerHTML = `
-    <div class="app-shell ${currentView === "help" ? "help-mode" : ""}">
+    <div class="app-shell ${currentView !== "builder" ? "page-mode" : ""}">
       <aside class="sidebar">
         <div class="brand">
           <h1>자동화 PC</h1>
           <span class="status-pill ${bridgeState.connected ? "" : "offline"}" title="${escapeHtml(bridgeState.lastMessage)}"><span class="dot"></span>${bridgeState.connected ? "Bridge ON" : "Bridge OFF"}</span>
         </div>
-        <button class="primary" data-action="new-project">새 프로젝트</button>
+        <div class="plan-summary">
+          <span>${getCurrentPlan().name}</span>
+          <strong>프로젝트 ${projectLimitText()}</strong>
+          <small>${firebaseState.connected ? accountLabel() : firebaseState.message}</small>
+        </div>
+        <div class="account-strip">
+          ${firebaseState.connected ? `
+            ${firebaseState.photoURL ? `<img src="${escapeHtml(firebaseState.photoURL)}" alt="" />` : `<span class="avatar-fallback">${escapeHtml(accountLabel().slice(0, 1).toUpperCase())}</span>`}
+            <button data-action="google-logout">로그아웃</button>
+          ` : `
+            <button data-action="google-login">Google 로그인</button>
+          `}
+        </div>
+        <button class="primary" data-action="new-project">${canCreateProject() ? "새 프로젝트" : "업그레이드 필요"}</button>
         <button class="nav-button ${currentView === "help" ? "active" : ""}" data-action="show-help">도움말</button>
+        <button class="nav-button ${currentView === "pricing" ? "active" : ""}" data-action="show-pricing">요금제</button>
         <div class="project-list">
           ${state.projects.map((item) => `
             <button class="project-item ${currentView === "builder" && item.id === project.id ? "active" : ""}" data-project-id="${item.id}">
@@ -352,6 +682,7 @@ function render() {
 
       <main class="main">
         ${currentView === "help" ? renderHelpPage() : ""}
+        ${currentView === "pricing" ? renderPricingPage() : ""}
         <header class="topbar">
           <div>
             <h2>${escapeHtml(project.name)}</h2>
@@ -787,7 +1118,7 @@ async function runAutomation(limitToFirstRow = false) {
   refreshLogs(project);
 }
 
-document.addEventListener("click", (event) => {
+document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   const mappingItem = event.target.closest(".mapping-item");
 
@@ -816,7 +1147,22 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  if (action === "show-pricing") {
+    currentView = "pricing";
+    render();
+    return;
+  }
+
   if (action === "new-project") {
+    if (!canCreateProject()) {
+      const activeProject = getProject();
+      addLog(activeProject, "error", "Free 플랜은 프로젝트 2개까지 만들 수 있습니다. Pro로 업그레이드하면 무제한으로 만들 수 있습니다.");
+      currentView = "pricing";
+      saveState();
+      render();
+      return;
+    }
+
     const next = {
       id: crypto.randomUUID(),
       name: "새 자동화 프로젝트",
@@ -835,12 +1181,57 @@ document.addEventListener("click", (event) => {
   }
 
   if (action === "create-example-project") {
+    if (!canCreateProject()) {
+      const activeProject = getProject();
+      addLog(activeProject, "error", "Free 플랜은 프로젝트 2개까지 만들 수 있습니다. Pro로 업그레이드하면 예시 프로젝트를 더 만들 수 있습니다.");
+      currentView = "pricing";
+      saveState();
+      render();
+      return;
+    }
+
     const example = createExampleProject();
     state.projects.push(example);
     selectedProjectId = example.id;
     selectedMappingId = example.mappings[0]?.id;
     currentView = "builder";
     addLog(example, "success", "예시 자동화를 만들었습니다. 테스트 실행으로 흐름을 확인해보세요.");
+    saveState();
+    render();
+  }
+
+  if (action === "sync-license") {
+    if (firebaseState.connected) {
+      await syncLicenseFromFirebase();
+    } else {
+      await initFirebase();
+    }
+    render();
+  }
+
+  if (action === "google-login") {
+    await signInWithGoogle();
+  }
+
+  if (action === "google-logout") {
+    await signOutGoogle();
+  }
+
+  if (action === "select-plan") {
+    const nextPlan = button.dataset.planId || "free";
+    if (nextPlan !== "free" && !firebaseState.connected) {
+      const activeProject = getProject();
+      addLog(activeProject, "error", "유료 플랜은 Google 로그인 후 적용할 수 있습니다.");
+      currentView = "pricing";
+      saveState();
+      render();
+      return;
+    }
+
+    state.plan = nextPlan;
+    const activeProject = getProject();
+    addLog(activeProject, "success", `${getCurrentPlan().name} 플랜이 적용되었습니다.`);
+    await saveLicenseToFirebase(state.plan);
     saveState();
     render();
   }
@@ -990,3 +1381,4 @@ document.addEventListener("change", async (event) => {
 
 render();
 connectBridge();
+initFirebase();

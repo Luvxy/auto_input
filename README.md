@@ -9,6 +9,9 @@
 - 크롬 확장프로그램 MVP에서 보낸 웹 요소 매핑 수신
 - 예시 고객 등록 사이트에서 실제 입력/클릭 실행 확인
 - PC 앱에서 확장프로그램으로 실제 열린 웹페이지 실행 명령 전송
+- Free, Pro, Business 3단계 요금제 UI
+- Free 플랜 프로젝트 2개 제한
+- Firebase Auth Google 로그인 및 Firestore 라이선스 동기화
 - 값 입력, 버튼 클릭, 대기 단계 구성
 - CSV 데이터 불러오기 및 미리보기
 - 테스트 실행과 전체 실행 시뮬레이션
@@ -24,6 +27,28 @@ npm.cmd run serve
 ```
 
 브라우저에서 `http://localhost:4173`을 열면 됩니다.
+
+## Firebase 연결
+
+Firebase는 Google 계정과 라이선스 상태를 저장하는 용도로 연결합니다. 결제 연동 후에는 서버가 Firestore의 `licenses/{uid}` 문서를 갱신하고, PC 앱은 이 문서를 읽어 플랜을 적용합니다.
+
+1. Firebase 콘솔에서 웹 앱을 생성합니다.
+2. Authentication에서 `Google` 로그인을 활성화합니다.
+3. Firestore Database를 생성합니다.
+4. `src/firebase-config.js`의 `YOUR_*` 값을 Firebase 웹 앱 설정값으로 교체합니다.
+5. 앱을 새로고침하면 사이드바와 요금제 화면에 Google 로그인 버튼이 표시됩니다.
+6. 프로그램 안에서 Google 로그인을 하면 해당 계정 UID로 라이선스를 조회합니다.
+
+라이선스 문서 예시:
+
+```json
+{
+  "plan": "pro",
+  "status": "active"
+}
+```
+
+Firestore 경로는 `licenses/{Google 로그인 Firebase Auth UID}`입니다.
 
 ## 확장프로그램 MVP 연결
 

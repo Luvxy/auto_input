@@ -159,6 +159,63 @@ textarea {
   padding-right: 2px;
 }
 
+.plan-summary {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 12px;
+  padding: 10px;
+}
+
+.plan-summary strong {
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.plan-summary small {
+  color: rgba(255, 255, 255, 0.58);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-strip {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.account-strip button {
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.account-strip:has(button:only-child) {
+  grid-template-columns: 1fr;
+}
+
+.account-strip img,
+.avatar-fallback {
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+}
+
+.avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: #2f7f6e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .project-item {
   text-align: left;
   background: rgba(255, 255, 255, 0.06);
@@ -244,12 +301,13 @@ textarea {
   align-items: start;
 }
 
-.help-mode .topbar,
-.help-mode .workspace {
+.page-mode .topbar,
+.page-mode .workspace {
   display: none;
 }
 
-.help-page {
+.help-page,
+.pricing-page {
   padding: 20px 22px 28px;
   display: grid;
   gap: 16px;
@@ -324,6 +382,93 @@ textarea {
   font-size: 13px;
   margin-top: 12px;
   padding: 12px;
+}
+
+.current-plan-box {
+  min-width: 170px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafb;
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+}
+
+.current-plan-box span,
+.current-plan-box small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.current-plan-box strong {
+  font-size: 18px;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.pricing-card {
+  min-height: 360px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.pricing-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px rgba(31, 122, 102, 0.18), var(--shadow);
+}
+
+.pricing-card h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.pricing-card p,
+.pricing-card li {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.pricing-card p {
+  margin: 6px 0 0;
+}
+
+.pricing-card ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.pricing-card .price {
+  font-size: 24px;
+}
+
+.pricing-card button {
+  margin-top: auto;
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.account-actions button {
+  margin-top: 0;
+}
+
+.firebase-card {
+  background: #f8fafb;
 }
 
 .panel {
@@ -634,6 +779,10 @@ th {
   }
 
   .help-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pricing-grid {
     grid-template-columns: 1fr;
   }
 }
