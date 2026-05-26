@@ -5,10 +5,14 @@
   "description": "PC app MVP for user-configurable web automation workflows.",
   "main": "electron/main.js",
   "scripts": {
+    "build:tauri-assets": "node tools/prepare-tauri-dist.js",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "serve": "node tools/serve.js",
     "start": "electron ."
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "electron": "^31.7.7"
   }
 }

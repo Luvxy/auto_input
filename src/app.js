@@ -327,6 +327,35 @@ function accountLabel() {
   return firebaseState.email || firebaseState.displayName || shortUid() || firebaseState.message;
 }
 
+function isPaymentConfigured() {
+  const config = window.paymentConfig || {};
+  return Boolean(config.checkoutBaseUrl && !String(config.checkoutBaseUrl).includes("YOUR_PAYMENT_SERVER_DOMAIN"));
+}
+
+function buildCheckoutUrl(planId) {
+  const config = window.paymentConfig || {};
+  const url = new URL(config.checkoutBaseUrl);
+  url.searchParams.set("provider", config.provider || "nicepay");
+  url.searchParams.set("plan", planId);
+  url.searchParams.set("uid", firebaseState.uid);
+  url.searchParams.set("email", firebaseState.email);
+  url.searchParams.set("successUrl", config.successUrl || "");
+  url.searchParams.set("failUrl", config.failUrl || "");
+  return url.toString();
+}
+
+function startPaidPlanCheckout(planId) {
+  if (!isPaymentConfigured()) {
+    const project = getProject();
+    addLog(project, "error", "나이스페이 결제 서버 URL 설정이 필요합니다. src/payment-config.js를 확인하세요.");
+    refreshLogs(project);
+    return false;
+  }
+
+  window.open(buildCheckoutUrl(planId), "_blank", "noopener,noreferrer");
+  return true;
+}
+
 function setProject(mutator) {
   const project = getProject();
   mutator(project);
@@ -633,7 +662,7 @@ function renderPricingPage() {
               ${plan.id === "business" ? "<li>백업/복원, 예약 실행, 우선 지원 예정</li>" : ""}
             </ul>
             <button class="${plan.id === state.plan ? "" : "primary"}" data-action="select-plan" data-plan-id="${plan.id}">
-              ${plan.id === state.plan ? "현재 사용 중" : `${plan.name} 선택`}
+              ${plan.id === state.plan ? "현재 사용 중" : plan.id === "free" ? "Free 선택" : `${plan.name} 결제`}
             </button>
           </article>
         `).join("")}
@@ -1225,6 +1254,16 @@ document.addEventListener("click", async (event) => {
       currentView = "pricing";
       saveState();
       render();
+      return;
+    }
+
+    if (nextPlan !== "free") {
+      const opened = startPaidPlanCheckout(nextPlan);
+      if (opened) {
+        const activeProject = getProject();
+        addLog(activeProject, "info", `${plans[nextPlan].name} 나이스페이 결제 페이지를 열었습니다.`);
+        refreshLogs(activeProject);
+      }
       return;
     }
 
