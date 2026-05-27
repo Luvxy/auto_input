@@ -88,7 +88,7 @@ function renderPage({ title, body }) {
 </html>`;
 }
 
-exports.checkout = onRequest({ region: REGION }, async (req, res) => {
+exports.checkout = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
   if (req.method !== "GET") {
     res.status(405).send("Method Not Allowed");
     return;
@@ -151,7 +151,7 @@ exports.checkout = onRequest({ region: REGION }, async (req, res) => {
   res.status(200).send(renderPage({ title: `${plan.name} 결제`, body }));
 });
 
-exports.nicepayReturn = onRequest({ region: REGION, secrets: [nicepaySecretKey] }, async (req, res) => {
+exports.nicepayReturn = onRequest({ region: REGION, invoker: "public", secrets: [nicepaySecretKey] }, async (req, res) => {
   if (req.method !== "POST") {
     res.redirect(`${PUBLIC_BASE_URL}/payment-fail.html?message=${encodeURIComponent("잘못된 결제 응답입니다.")}`);
     return;
