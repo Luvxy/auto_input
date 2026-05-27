@@ -1,4 +1,5 @@
 const storageKey = "web-automation-pc-mvp-state";
+const desktopSessionStorageKey = "web-automation-pc-mvp-desktop-session";
 const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
 const desktopLoginTimeoutMs = 120000;
 const desktopLoginPollMs = 2000;
@@ -83,6 +84,7 @@ let firebaseState = {
   email: "",
   displayName: "",
   photoURL: "",
+  appSessionToken: "",
   message: "Firebase 확인 중"
 };
 
@@ -156,6 +158,12 @@ async function initFirebase() {
 
     firebase.auth().onAuthStateChanged(async (user) => {
       if (!user) {
+        const restored = await restoreDesktopSession();
+        if (restored) {
+          render();
+          return;
+        }
+
         firebaseState = {
           configured: true,
           connected: false,
@@ -164,6 +172,7 @@ async function initFirebase() {
           email: "",
           displayName: "",
           photoURL: "",
+          appSessionToken: "",
           message: "Google 로그인이 필요합니다"
         };
         state.plan = "free";
@@ -180,6 +189,7 @@ async function initFirebase() {
         email: user.email || "",
         displayName: user.displayName || "",
         photoURL: user.photoURL || "",
+        appSessionToken: "",
         message: "Google 로그인됨"
       };
 
@@ -318,10 +328,10 @@ async function signInWithDesktopBridge() {
   while (Date.now() - startedAt < desktopLoginTimeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, desktopLoginPollMs));
     const response = await fetch(`${desktopLoginBaseUrl}/desktop-login-status?session=${encodeURIComponent(sessionId)}`);
-    const result = await response.json();
+    const result = await parseLoginStatusResponse(response);
 
-    if (result.status === "completed" && result.customToken) {
-      await firebase.auth().signInWithCustomToken(result.customToken);
+    if (result.status === "completed") {
+      applyDesktopLoginResult(result);
       return;
     }
 
@@ -333,13 +343,85 @@ async function signInWithDesktopBridge() {
   throw new Error("Desktop login timed out.");
 }
 
+async function parseLoginStatusResponse(response) {
+  const text = await response.text();
+  try {
+    const result = JSON.parse(text);
+    if (!response.ok) {
+      throw new Error(result.error || `Login server error (${response.status})`);
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`Login server error (${response.status}): ${text.slice(0, 120)}`);
+    }
+    throw error;
+  }
+}
+
+function applyDesktopLoginResult(result) {
+  const user = result.user || {};
+  firebaseState = {
+    configured: true,
+    connected: true,
+    loading: false,
+    uid: user.uid || "",
+    email: user.email || "",
+    displayName: user.displayName || "",
+    photoURL: user.photoURL || "",
+    appSessionToken: result.appSessionToken || firebaseState.appSessionToken || "",
+    message: "Google login connected"
+  };
+
+  if (firebaseState.appSessionToken) {
+    localStorage.setItem(desktopSessionStorageKey, firebaseState.appSessionToken);
+  }
+  applyLicense(result.license);
+  saveState();
+  render();
+}
+
+function applyLicense(license) {
+  if (!license || license.status !== "active" || !plans[license.plan] || isLicenseExpired(license)) {
+    state.plan = "free";
+    return;
+  }
+  state.plan = license.plan;
+}
+
+async function restoreDesktopSession() {
+  const token = localStorage.getItem(desktopSessionStorageKey);
+  if (!token) return false;
+
+  try {
+    const response = await fetch(`${desktopLoginBaseUrl}/desktop-license?token=${encodeURIComponent(token)}`);
+    const result = await parseLoginStatusResponse(response);
+    if (result.status !== "active") return false;
+    applyDesktopLoginResult({ ...result, appSessionToken: token });
+    return true;
+  } catch {
+    localStorage.removeItem(desktopSessionStorageKey);
+    return false;
+  }
+}
+
 async function signOutGoogle() {
+  localStorage.removeItem(desktopSessionStorageKey);
   if (!window.firebase || !firebase.apps.length) return;
   await firebase.auth().signOut();
 }
 
 async function syncLicenseFromFirebase(uid = firebaseState.uid) {
   if (!firebaseState.connected || !uid) return;
+
+  if (firebaseState.appSessionToken && (!window.firebase || !firebase.auth().currentUser)) {
+    const response = await fetch(`${desktopLoginBaseUrl}/desktop-license?token=${encodeURIComponent(firebaseState.appSessionToken)}`);
+    const result = await parseLoginStatusResponse(response);
+    applyLicense(result.license);
+    saveState();
+    render();
+    return;
+  }
 
   const snapshot = await firebase.firestore().collection("licenses").doc(uid).get();
   if (!snapshot.exists) {
@@ -375,6 +457,11 @@ function isLicenseExpired(license) {
 
 async function saveLicenseToFirebase(planId) {
   if (!firebaseState.connected || !firebaseState.uid) return;
+  if (firebaseState.appSessionToken && (!window.firebase || !firebase.auth().currentUser)) {
+    state.plan = planId;
+    saveState();
+    return;
+  }
 
   await firebase.firestore().collection("licenses").doc(firebaseState.uid).set(
     {

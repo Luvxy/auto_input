@@ -38,6 +38,13 @@
           "functionId": "desktopLoginStatus",
           "region": "asia-northeast3"
         }
+      },
+      {
+        "source": "/desktop-license",
+        "function": {
+          "functionId": "desktopLicense",
+          "region": "asia-northeast3"
+        }
       }
     ]
   }

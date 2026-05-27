@@ -30,6 +30,7 @@ const plans = {
 };
 
 const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
+const APP_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -250,6 +251,17 @@ function isValidSessionId(sessionId) {
   return /^[a-zA-Z0-9_-]{20,80}$/.test(sessionId);
 }
 
+async function getLicenseForUid(uid) {
+  const snapshot = await admin.firestore().collection("licenses").doc(uid).get();
+  if (!snapshot.exists) return { plan: "free", status: "active" };
+  const license = snapshot.data();
+  return {
+    plan: license.plan || "free",
+    status: license.status || "active",
+    expiresAt: license.expiresAt?.toDate?.().toISOString?.() || ""
+  };
+}
+
 exports.desktopLoginComplete = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") {
@@ -321,11 +333,67 @@ exports.desktopLoginStatus = onRequest({ region: REGION, invoker: "public" }, as
     return;
   }
 
-  const customToken = await admin.auth().createCustomToken(session.uid);
+  const appSessionToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomBytes(16).toString("hex");
+  const expiresAt = new Date(Date.now() + APP_SESSION_TTL_MS);
+  await admin.firestore().collection("desktopAppSessions").doc(appSessionToken).set({
+    uid: session.uid,
+    email: session.email || "",
+    displayName: session.displayName || "",
+    photoURL: session.photoURL || "",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt: admin.firestore.Timestamp.fromDate(expiresAt)
+  });
+  const license = await getLicenseForUid(session.uid);
   await sessionRef.delete();
   res.status(200).json({
     status: "completed",
-    customToken,
+    appSessionToken,
+    license,
+    user: {
+      uid: session.uid,
+      email: session.email || "",
+      displayName: session.displayName || "",
+      photoURL: session.photoURL || ""
+    }
+  });
+});
+
+exports.desktopLicense = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "GET") {
+    res.status(405).json({ status: "error", error: "Method Not Allowed" });
+    return;
+  }
+
+  const token = String(req.query.token || "");
+  if (!isValidSessionId(token)) {
+    res.status(400).json({ status: "error", error: "Invalid app session" });
+    return;
+  }
+
+  const sessionRef = admin.firestore().collection("desktopAppSessions").doc(token);
+  const snapshot = await sessionRef.get();
+  if (!snapshot.exists) {
+    res.status(401).json({ status: "error", error: "App session not found" });
+    return;
+  }
+
+  const session = snapshot.data();
+  const expiresAt = session.expiresAt?.toDate?.() || new Date(0);
+  if (expiresAt.getTime() < Date.now()) {
+    await sessionRef.delete();
+    res.status(401).json({ status: "expired", error: "App session expired" });
+    return;
+  }
+
+  const license = await getLicenseForUid(session.uid);
+  res.status(200).json({
+    status: "active",
+    license,
     user: {
       uid: session.uid,
       email: session.email || "",
