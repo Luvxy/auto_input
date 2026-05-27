@@ -34,6 +34,7 @@
       const sessionId = params.get("session") || "";
       const message = document.getElementById("message");
       const button = document.getElementById("login-button");
+      let loginCompleted = false;
 
       firebase.initializeApp(firebaseConfig);
 
@@ -41,27 +42,45 @@
         message.textContent = text;
       }
 
+      function hasValidSession() {
+        return /^[a-zA-Z0-9_-]{20,80}$/.test(sessionId);
+      }
+
       async function completeLogin(user) {
-        const idToken = await user.getIdToken();
-        const response = await fetch("/desktop-login-complete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, idToken })
-        });
-        if (!response.ok) {
-          const result = await response.json().catch(() => ({}));
-          throw new Error(result.error || "PC 앱 로그인 연결에 실패했습니다.");
+        if (loginCompleted || !user) return;
+        if (!hasValidSession()) {
+          setMessage("로그인 세션이 올바르지 않습니다. PC 앱에서 다시 시도해 주세요.");
+          return;
         }
-        setMessage("로그인이 완료되었습니다. PC 앱으로 돌아가 주세요.");
-        button.hidden = true;
+
+        loginCompleted = true;
+        button.disabled = true;
+        setMessage("Google 로그인 정보를 PC 앱에 연결하는 중입니다.");
+
+        try {
+          const idToken = await user.getIdToken(true);
+          const response = await fetch("/desktop-login-complete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId, idToken })
+          });
+          if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || "PC 앱 로그인 연결에 실패했습니다.");
+          }
+          setMessage("로그인이 완료되었습니다. PC 앱으로 돌아가 주세요.");
+          button.hidden = true;
+        } catch (error) {
+          loginCompleted = false;
+          button.disabled = false;
+          setMessage(`로그인 연결 실패: ${error.message}`);
+        }
       }
 
       async function finishRedirectLogin() {
         try {
           const result = await firebase.auth().getRedirectResult();
           if (result.user) {
-            button.disabled = true;
-            setMessage("Google 로그인 결과를 PC 앱에 연결하는 중입니다.");
             await completeLogin(result.user);
           }
         } catch (error) {
@@ -69,8 +88,13 @@
         }
       }
 
+      firebase.auth().onAuthStateChanged(async (user) => {
+        if (!user || loginCompleted) return;
+        await completeLogin(user);
+      });
+
       button.addEventListener("click", async () => {
-        if (!/^[a-zA-Z0-9_-]{20,80}$/.test(sessionId)) {
+        if (!hasValidSession()) {
           setMessage("로그인 세션이 올바르지 않습니다. PC 앱에서 다시 시도해 주세요.");
           return;
         }
