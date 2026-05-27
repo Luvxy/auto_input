@@ -387,6 +387,38 @@ footer {
   line-height: 1.75;
 }
 
+.simple-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.simple-page main {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 32px;
+  box-shadow: 0 18px 45px rgba(22, 29, 44, 0.08);
+}
+
+.simple-page .brand {
+  display: inline-flex;
+  margin-bottom: 28px;
+}
+
+.simple-page h1 {
+  margin-bottom: 12px;
+}
+
+.simple-page p {
+  margin-bottom: 24px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 @media (max-width: 980px) {
   .hero,
   .intro,

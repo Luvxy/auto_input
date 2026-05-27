@@ -1,6 +1,6 @@
 window.paymentConfig = {
   provider: "nicepay",
-  checkoutBaseUrl: "https://YOUR_PAYMENT_SERVER_DOMAIN/checkout",
-  successUrl: "auto-input://payment/success",
-  failUrl: "auto-input://payment/fail"
+  checkoutBaseUrl: "https://auto-web-8f2de.web.app/checkout",
+  successUrl: "https://auto-web-8f2de.web.app/payment-success.html",
+  failUrl: "https://auto-web-8f2de.web.app/payment-fail.html"
 };

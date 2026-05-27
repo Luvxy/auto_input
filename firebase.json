@@ -1,7 +1,30 @@
 {
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "runtime": "nodejs20"
+    }
+  ],
   "hosting": {
     "public": "site",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "cleanUrls": true
+    "cleanUrls": true,
+    "rewrites": [
+      {
+        "source": "/checkout",
+        "function": {
+          "functionId": "checkout",
+          "region": "asia-northeast3"
+        }
+      },
+      {
+        "source": "/nicepay-return",
+        "function": {
+          "functionId": "nicepayReturn",
+          "region": "asia-northeast3"
+        }
+      }
+    ]
   }
 }

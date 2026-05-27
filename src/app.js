@@ -281,10 +281,24 @@ async function syncLicenseFromFirebase(uid = firebaseState.uid) {
   }
 
   const license = snapshot.data();
-  if (license.status === "active" && plans[license.plan]) {
+  if (license.status === "active" && plans[license.plan] && !isLicenseExpired(license)) {
     state.plan = license.plan;
     saveState();
+    return;
   }
+
+  if (license.plan !== "free") {
+    state.plan = "free";
+    saveState();
+  }
+}
+
+function isLicenseExpired(license) {
+  if (!license.expiresAt) return false;
+  const expiresAt = typeof license.expiresAt.toDate === "function"
+    ? license.expiresAt.toDate()
+    : new Date(license.expiresAt);
+  return Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now();
 }
 
 async function saveLicenseToFirebase(planId) {
