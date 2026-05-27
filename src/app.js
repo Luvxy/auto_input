@@ -236,6 +236,9 @@ async function signInWithGoogle() {
     } catch (popupError) {
       if (
         popupError.code === "auth/internal-error" ||
+        popupError.code === "auth/popup-blocked" ||
+        popupError.code === "auth/popup-closed-by-user" ||
+        popupError.code === "auth/cancelled-popup-request" ||
         popupError.code === "auth/operation-not-supported-in-this-environment" ||
         popupError.code === "auth/unauthorized-domain"
       ) {

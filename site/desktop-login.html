@@ -56,6 +56,19 @@
         button.hidden = true;
       }
 
+      async function finishRedirectLogin() {
+        try {
+          const result = await firebase.auth().getRedirectResult();
+          if (result.user) {
+            button.disabled = true;
+            setMessage("Google 로그인 결과를 PC 앱에 연결하는 중입니다.");
+            await completeLogin(result.user);
+          }
+        } catch (error) {
+          setMessage(`로그인 실패: ${error.message}`);
+        }
+      }
+
       button.addEventListener("click", async () => {
         if (!/^[a-zA-Z0-9_-]{20,80}$/.test(sessionId)) {
           setMessage("로그인 세션이 올바르지 않습니다. PC 앱에서 다시 시도해 주세요.");
@@ -67,13 +80,28 @@
         try {
           const provider = new firebase.auth.GoogleAuthProvider();
           provider.setCustomParameters({ prompt: "select_account" });
-          const result = await firebase.auth().signInWithPopup(provider);
-          await completeLogin(result.user);
+          try {
+            const result = await firebase.auth().signInWithPopup(provider);
+            await completeLogin(result.user);
+          } catch (popupError) {
+            if (
+              popupError.code === "auth/popup-blocked" ||
+              popupError.code === "auth/popup-closed-by-user" ||
+              popupError.code === "auth/cancelled-popup-request"
+            ) {
+              setMessage("Google 로그인 페이지로 이동합니다.");
+              await firebase.auth().signInWithRedirect(provider);
+              return;
+            }
+            throw popupError;
+          }
         } catch (error) {
           button.disabled = false;
           setMessage(`로그인 실패: ${error.message}`);
         }
       });
+
+      finishRedirectLogin();
     </script>
   </body>
 </html>
