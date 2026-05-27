@@ -419,6 +419,20 @@ footer {
   line-height: 1.7;
 }
 
+.simple-page .login-note {
+  margin: 16px 0 0;
+  font-size: 14px;
+}
+
+.login-complete .brand-mark {
+  background: #1f7a66;
+}
+
+.login-complete main {
+  border-color: rgba(31, 122, 102, 0.3);
+  box-shadow: 0 22px 60px rgba(31, 122, 102, 0.16);
+}
+
 @media (max-width: 980px) {
   .hero,
   .intro,

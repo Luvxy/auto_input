@@ -14,9 +14,11 @@
         <span class="brand-mark">AI</span>
         <span>Auto Input</span>
       </a>
-      <h1>Auto Input 로그인</h1>
+      <p class="eyebrow" id="status-label">Google 로그인</p>
+      <h1 id="title">Auto Input에 연결하기</h1>
       <p id="message">Google 계정으로 로그인하면 PC 앱에 자동으로 연결됩니다.</p>
       <button class="button primary" id="login-button" type="button">Google로 계속하기</button>
+      <p class="login-note" id="note">로그인이 끝나면 이 창은 닫아도 됩니다.</p>
     </main>
 
     <script>
@@ -32,8 +34,11 @@
 
       const params = new URLSearchParams(location.search);
       const sessionId = params.get("session") || "";
+      const statusLabel = document.getElementById("status-label");
+      const title = document.getElementById("title");
       const message = document.getElementById("message");
       const button = document.getElementById("login-button");
+      const note = document.getElementById("note");
       let loginCompleted = false;
 
       firebase.initializeApp(firebaseConfig);
@@ -46,6 +51,16 @@
         return /^[a-zA-Z0-9_-]{20,80}$/.test(sessionId);
       }
 
+      function showCompleted() {
+        statusLabel.textContent = "연결 완료";
+        title.textContent = "로그인이 완료되었습니다";
+        setMessage("이제 Auto Input PC 앱으로 돌아가세요. 앱이 몇 초 안에 로그인 상태로 바뀝니다.");
+        note.textContent = "PC 앱에서 로그인됨으로 표시되면 이 창은 닫아도 됩니다.";
+        button.hidden = true;
+        button.disabled = true;
+        document.body.classList.add("login-complete");
+      }
+
       async function completeLogin(user) {
         if (loginCompleted || !user) return;
         if (!hasValidSession()) {
@@ -55,6 +70,7 @@
 
         loginCompleted = true;
         button.disabled = true;
+        statusLabel.textContent = "연결 중";
         setMessage("Google 로그인 정보를 PC 앱에 연결하는 중입니다.");
 
         try {
@@ -68,11 +84,11 @@
             const result = await response.json().catch(() => ({}));
             throw new Error(result.error || "PC 앱 로그인 연결에 실패했습니다.");
           }
-          setMessage("로그인이 완료되었습니다. PC 앱으로 돌아가 주세요.");
-          button.hidden = true;
+          showCompleted();
         } catch (error) {
           loginCompleted = false;
           button.disabled = false;
+          statusLabel.textContent = "연결 실패";
           setMessage(`로그인 연결 실패: ${error.message}`);
         }
       }
@@ -84,6 +100,7 @@
             await completeLogin(result.user);
           }
         } catch (error) {
+          statusLabel.textContent = "로그인 실패";
           setMessage(`로그인 실패: ${error.message}`);
         }
       }
@@ -100,6 +117,7 @@
         }
 
         button.disabled = true;
+        statusLabel.textContent = "로그인 중";
         setMessage("Google 로그인 창을 여는 중입니다.");
         try {
           const provider = new firebase.auth.GoogleAuthProvider();
@@ -121,6 +139,7 @@
           }
         } catch (error) {
           button.disabled = false;
+          statusLabel.textContent = "로그인 실패";
           setMessage(`로그인 실패: ${error.message}`);
         }
       });

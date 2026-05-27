@@ -556,7 +556,7 @@ function connectBridge() {
     return;
   }
 
-  bridgeSocket = new WebSocket(`ws://${location.host}/ws`);
+  bridgeSocket = new WebSocket(getBridgeSocketUrl());
 
   bridgeSocket.addEventListener("open", () => {
     bridgeState = { connected: true, lastMessage: "Extension bridge connected" };
@@ -604,6 +604,13 @@ function connectBridge() {
   bridgeSocket.addEventListener("error", () => {
     bridgeState = { connected: false, lastMessage: "Bridge error" };
   });
+}
+
+function getBridgeSocketUrl() {
+  if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+    return `ws://${location.host}/ws`;
+  }
+  return "ws://localhost:4173/ws";
 }
 
 function receiveMappedElement(payload = {}) {
