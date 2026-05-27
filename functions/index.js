@@ -29,6 +29,8 @@ const plans = {
   }
 };
 
+const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -236,4 +238,99 @@ exports.nicepayReturn = onRequest({ region: REGION, invoker: "public", secrets: 
     }
     res.redirect(`${PUBLIC_BASE_URL}/payment-fail.html?message=${encodeURIComponent(error.message)}`);
   }
+});
+
+function setCors(res) {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type,Authorization");
+}
+
+function isValidSessionId(sessionId) {
+  return /^[a-zA-Z0-9_-]{20,80}$/.test(sessionId);
+}
+
+exports.desktopLoginComplete = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST") {
+    res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    return;
+  }
+
+  const { sessionId, idToken } = req.body || {};
+  if (!isValidSessionId(String(sessionId || "")) || !idToken) {
+    res.status(400).json({ ok: false, error: "Invalid login session" });
+    return;
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    await admin.firestore().collection("desktopLoginSessions").doc(sessionId).set({
+      status: "completed",
+      uid: decoded.uid,
+      email: decoded.email || "",
+      displayName: decoded.name || "",
+      photoURL: decoded.picture || "",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    res.status(401).json({ ok: false, error: error.message });
+  }
+});
+
+exports.desktopLoginStatus = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "GET") {
+    res.status(405).json({ status: "error", error: "Method Not Allowed" });
+    return;
+  }
+
+  const sessionId = String(req.query.session || "");
+  if (!isValidSessionId(sessionId)) {
+    res.status(400).json({ status: "error", error: "Invalid login session" });
+    return;
+  }
+
+  const sessionRef = admin.firestore().collection("desktopLoginSessions").doc(sessionId);
+  const snapshot = await sessionRef.get();
+  if (!snapshot.exists) {
+    res.status(200).json({ status: "pending" });
+    return;
+  }
+
+  const session = snapshot.data();
+  const createdAt = session.createdAt?.toDate?.() || new Date();
+  if (Date.now() - createdAt.getTime() > LOGIN_SESSION_TTL_MS) {
+    await sessionRef.delete();
+    res.status(410).json({ status: "expired" });
+    return;
+  }
+
+  if (session.status !== "completed" || !session.uid) {
+    res.status(200).json({ status: "pending" });
+    return;
+  }
+
+  const customToken = await admin.auth().createCustomToken(session.uid);
+  await sessionRef.delete();
+  res.status(200).json({
+    status: "completed",
+    customToken,
+    user: {
+      uid: session.uid,
+      email: session.email || "",
+      displayName: session.displayName || "",
+      photoURL: session.photoURL || ""
+    }
+  });
 });

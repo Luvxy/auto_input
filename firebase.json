@@ -24,6 +24,20 @@
           "functionId": "nicepayReturn",
           "region": "asia-northeast3"
         }
+      },
+      {
+        "source": "/desktop-login-complete",
+        "function": {
+          "functionId": "desktopLoginComplete",
+          "region": "asia-northeast3"
+        }
+      },
+      {
+        "source": "/desktop-login-status",
+        "function": {
+          "functionId": "desktopLoginStatus",
+          "region": "asia-northeast3"
+        }
       }
     ]
   }

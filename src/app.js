@@ -1,4 +1,7 @@
 const storageKey = "web-automation-pc-mvp-state";
+const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
+const desktopLoginTimeoutMs = 120000;
+const desktopLoginPollMs = 2000;
 
 const plans = {
   free: {
@@ -232,6 +235,15 @@ async function signInWithGoogle() {
       await firebase.auth().signInWithPopup(provider);
     } catch (popupError) {
       if (
+        popupError.code === "auth/internal-error" ||
+        popupError.code === "auth/operation-not-supported-in-this-environment" ||
+        popupError.code === "auth/unauthorized-domain"
+      ) {
+        await signInWithDesktopBridge();
+        return;
+      }
+
+      if (
         popupError.code === "auth/popup-blocked" ||
         popupError.code === "auth/popup-closed-by-user" ||
         popupError.code === "auth/cancelled-popup-request"
@@ -259,6 +271,52 @@ async function signInWithGoogle() {
     };
     render();
   }
+}
+
+function createDesktopLoginSessionId() {
+  if (crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function openDesktopLoginPage(sessionId) {
+  const url = `${desktopLoginBaseUrl}/desktop-login.html?session=${encodeURIComponent(sessionId)}`;
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    location.href = url;
+  }
+}
+
+async function signInWithDesktopBridge() {
+  const sessionId = createDesktopLoginSessionId();
+  const startedAt = Date.now();
+
+  firebaseState = {
+    ...firebaseState,
+    configured: true,
+    loading: true,
+    message: "Opening browser login..."
+  };
+  render();
+  openDesktopLoginPage(sessionId);
+
+  while (Date.now() - startedAt < desktopLoginTimeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, desktopLoginPollMs));
+    const response = await fetch(`${desktopLoginBaseUrl}/desktop-login-status?session=${encodeURIComponent(sessionId)}`);
+    const result = await response.json();
+
+    if (result.status === "completed" && result.customToken) {
+      await firebase.auth().signInWithCustomToken(result.customToken);
+      return;
+    }
+
+    if (result.status === "expired" || result.status === "error") {
+      throw new Error(result.error || "Desktop login session expired.");
+    }
+  }
+
+  throw new Error("Desktop login timed out.");
 }
 
 async function signOutGoogle() {
