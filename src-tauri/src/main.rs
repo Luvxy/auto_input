@@ -1,5 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
-use std::{net::SocketAddr, thread};
+use std::{net::SocketAddr, process::Command, thread};
 use tokio::{
     net::{TcpListener, TcpStream},
     runtime::Runtime,
@@ -13,8 +13,43 @@ fn main() {
     start_bridge_server();
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![open_external_url])
         .run(tauri::generate_context!())
         .expect("failed to run Auto Input");
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://auto-web-8f2de.web.app/desktop-login.html?session=") {
+        return Err("External URL is not allowed".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        return Ok(());
+    }
 }
 
 fn start_bridge_server() {

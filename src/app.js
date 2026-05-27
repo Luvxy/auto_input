@@ -283,8 +283,19 @@ function createDesktopLoginSessionId() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function openDesktopLoginPage(sessionId) {
+async function openDesktopLoginPage(sessionId) {
   const url = `${desktopLoginBaseUrl}/desktop-login.html?session=${encodeURIComponent(sessionId)}`;
+  const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+
+  if (invoke) {
+    try {
+      await invoke("open_external_url", { url });
+      return;
+    } catch (error) {
+      console.warn("Falling back to window.open for desktop login", error);
+    }
+  }
+
   const opened = window.open(url, "_blank", "noopener,noreferrer");
   if (!opened) {
     location.href = url;
@@ -302,7 +313,7 @@ async function signInWithDesktopBridge() {
     message: "Opening browser login..."
   };
   render();
-  openDesktopLoginPage(sessionId);
+  await openDesktopLoginPage(sessionId);
 
   while (Date.now() - startedAt < desktopLoginTimeoutMs) {
     await new Promise((resolve) => setTimeout(resolve, desktopLoginPollMs));
