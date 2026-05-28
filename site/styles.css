@@ -387,6 +387,26 @@ footer {
   line-height: 1.75;
 }
 
+.guide-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 32px;
+  padding-left: 24px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.guide-list strong {
+  color: var(--text);
+}
+
+.document-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
 .simple-page {
   min-height: 100vh;
   display: grid;
