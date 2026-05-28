@@ -56,6 +56,8 @@ const sampleProject = {
     }
   ],
   steps: [],
+  shortcut: "",
+  nextRowIndex: 0,
   data: {
     columns: ["name", "phone"],
     rows: [
@@ -98,11 +100,19 @@ function loadState() {
     const parsed = JSON.parse(saved);
     return {
       plan: parsed.plan || "free",
-      projects: parsed.projects?.length ? parsed.projects : [sampleProject]
+      projects: parsed.projects?.length ? parsed.projects.map(normalizeProject) : [normalizeProject(sampleProject)]
     };
   } catch {
-    return { plan: "free", projects: [sampleProject] };
+    return { plan: "free", projects: [normalizeProject(sampleProject)] };
   }
+}
+
+function normalizeProject(project) {
+  return {
+    ...project,
+    shortcut: project.shortcut || "",
+    nextRowIndex: Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0
+  };
 }
 
 function saveState() {
@@ -544,6 +554,7 @@ function setProject(mutator) {
 function syncProjectForm(project) {
   const nameInput = document.querySelector("#project-name");
   const targetInput = document.querySelector("#target-url");
+  const shortcutInput = document.querySelector("#shortcut-key");
 
   if (nameInput) {
     project.name = nameInput.value.trim() || "이름 없는 프로젝트";
@@ -551,6 +562,10 @@ function syncProjectForm(project) {
 
   if (targetInput) {
     project.targetUrl = normalizeTargetUrl(targetInput.value);
+  }
+
+  if (shortcutInput) {
+    project.shortcut = shortcutInput.value.trim();
   }
 
   saveState();
@@ -718,6 +733,8 @@ function createExampleProject() {
       { id: crypto.randomUUID(), type: "input", targetId: phoneMappingId, valueSource: "column", column: "phone" },
       { id: crypto.randomUUID(), type: "click", targetId: saveMappingId }
     ],
+    shortcut: "Ctrl+Alt+1",
+    nextRowIndex: 0,
     data: {
       columns: ["name", "phone"],
       rows: [
@@ -1028,6 +1045,7 @@ function render() {
 
           <section class="panel run-panel">
             ${renderDemoPanel(project)}
+            ${renderShortcutPanel(project)}
             <div class="panel-header">
               <div>
                 <h3>데이터</h3>
@@ -1080,6 +1098,51 @@ function renderDataTable(project) {
           `).join("")}
         </tbody>
       </table>
+    </div>
+  `;
+}
+
+function renderShortcutPanel(project) {
+  const rows = project.data?.rows || [];
+  const columns = project.data?.columns || [];
+  const index = getDisplayRowIndex(project);
+  const row = rows[index] || {};
+  const completed = rows.length > 0 && project.nextRowIndex >= rows.length;
+
+  return `
+    <div class="panel-header">
+      <div>
+        <h3>단축키 실행</h3>
+        <span>단축키를 누를 때마다 현재 행 1개를 실행하고 다음 데이터로 이동</span>
+      </div>
+      <button class="primary" data-action="run-shortcut-flow">현재 행 실행</button>
+    </div>
+    <div class="panel-body stack">
+      <div class="inline-fields">
+        <div class="field">
+          <label for="shortcut-key">단축키</label>
+          <input id="shortcut-key" value="${escapeHtml(project.shortcut || "")}" placeholder="예: Ctrl+Alt+1" readonly />
+        </div>
+        <div class="field">
+          <label>다음 데이터</label>
+          <div class="shortcut-row-indicator">${rows.length ? completed ? "모든 데이터 실행 완료" : `${index + 1} / ${rows.length}행` : "데이터 없음"}</div>
+        </div>
+      </div>
+      <div class="shortcut-preview">
+        ${completed
+          ? "모든 행을 실행했습니다. 처음 행으로 돌아가 다시 실행할 수 있습니다."
+          : rows.length && columns.length
+          ? columns.slice(0, 4).map((column) => `
+            <span><strong>${escapeHtml(column)}</strong>${escapeHtml(row[column] ?? "")}</span>
+          `).join("")
+          : "CSV 데이터를 불러오면 단축키 실행 대상 행이 표시됩니다."}
+      </div>
+      <div class="row-actions">
+        <button data-action="reset-shortcut-row">처음 행으로</button>
+        <button data-action="prev-shortcut-row">이전 행</button>
+        <button data-action="next-shortcut-row">다음 행</button>
+        <button data-action="clear-shortcut">단축키 해제</button>
+      </div>
     </div>
   `;
 }
@@ -1225,6 +1288,38 @@ function buildRunPayload(project, targetRows) {
   };
 }
 
+function clampNextRowIndex(project) {
+  const rows = project.data?.rows || [];
+  if (!rows.length) {
+    project.nextRowIndex = 0;
+    return 0;
+  }
+
+  if (!Number.isInteger(project.nextRowIndex)) {
+    project.nextRowIndex = 0;
+  }
+
+  project.nextRowIndex = Math.min(Math.max(project.nextRowIndex, 0), rows.length - 1);
+  return project.nextRowIndex;
+}
+
+function getDisplayRowIndex(project) {
+  const rows = project.data?.rows || [];
+  if (!rows.length) return 0;
+  if (!Number.isInteger(project.nextRowIndex)) project.nextRowIndex = 0;
+  return Math.min(Math.max(project.nextRowIndex, 0), rows.length - 1);
+}
+
+function advanceShortcutRow(project, amount) {
+  const rows = project.data?.rows || [];
+  if (!rows.length) {
+    project.nextRowIndex = 0;
+    return;
+  }
+  const nextIndex = (Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0) + amount;
+  project.nextRowIndex = Math.min(Math.max(nextIndex, 0), rows.length);
+}
+
 function getDemoDocument() {
   const frame = document.querySelector("#demo-frame");
   return frame?.contentDocument || null;
@@ -1332,6 +1427,65 @@ async function runAutomation(limitToFirstRow = false) {
   refreshLogs(project);
 }
 
+async function runShortcutFlow() {
+  const project = getProject();
+  syncProjectForm(project);
+  const rows = project.data?.rows || [];
+
+  if (!project.steps.length) {
+    addLog(project, "error", "단축키로 실행할 자동화 단계가 없습니다.");
+    refreshLogs(project);
+    return;
+  }
+
+  if (!rows.length) {
+    addLog(project, "error", "단축키로 실행할 데이터가 없습니다.");
+    refreshLogs(project);
+    return;
+  }
+
+  if (!Number.isInteger(project.nextRowIndex)) {
+    project.nextRowIndex = 0;
+  }
+
+  if (project.nextRowIndex >= rows.length) {
+    addLog(project, "info", "모든 데이터 행을 실행했습니다. 처음 행으로 돌아가 다시 실행할 수 있습니다.");
+    refreshLogs(project);
+    render();
+    return;
+  }
+
+  const rowIndex = project.nextRowIndex;
+  const row = rows[rowIndex];
+  addLog(project, "info", `단축키 실행: ${rowIndex + 1}행`);
+  refreshLogs(project);
+
+  if (!isDemoProject(project)) {
+    const sent = sendBridgeMessage({
+      type: "automation-run",
+      payload: buildRunPayload(project, [row])
+    });
+
+    if (!sent) return;
+    advanceShortcutRow(project, 1);
+    addLog(project, "success", `다음 데이터 준비: ${Math.min(project.nextRowIndex + 1, rows.length)} / ${rows.length}행`);
+    saveState();
+    refreshLogs(project);
+    render();
+    return;
+  }
+
+  for (const step of project.steps) {
+    await runDemoStep(project, step, row);
+  }
+
+  advanceShortcutRow(project, 1);
+  addLog(project, "success", `${rowIndex + 1}행 실행 완료. 다음 데이터를 준비했습니다.`);
+  saveState();
+  refreshLogs(project);
+  render();
+}
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   const mappingItem = event.target.closest(".mapping-item");
@@ -1383,6 +1537,8 @@ document.addEventListener("click", async (event) => {
       targetUrl: "",
       mappings: [],
       steps: [],
+      shortcut: "",
+      nextRowIndex: 0,
       data: { columns: [], rows: [] },
       logs: []
     };
@@ -1552,6 +1708,34 @@ document.addEventListener("click", async (event) => {
     render();
   }
 
+  if (action === "run-shortcut-flow") {
+    await runShortcutFlow();
+  }
+
+  if (action === "reset-shortcut-row") {
+    setProject((activeProject) => {
+      activeProject.nextRowIndex = 0;
+    });
+  }
+
+  if (action === "prev-shortcut-row") {
+    setProject((activeProject) => {
+      advanceShortcutRow(activeProject, -1);
+    });
+  }
+
+  if (action === "next-shortcut-row") {
+    setProject((activeProject) => {
+      advanceShortcutRow(activeProject, 1);
+    });
+  }
+
+  if (action === "clear-shortcut") {
+    setProject((activeProject) => {
+      activeProject.shortcut = "";
+    });
+  }
+
   if (action === "clear-logs") {
     project.logs = [];
     saveState();
@@ -1599,9 +1783,59 @@ document.addEventListener("change", async (event) => {
   const text = await file.text();
   setProject((project) => {
     project.data = parseCsv(text);
+    project.nextRowIndex = 0;
     addLog(project, "success", `${file.name} 파일을 불러왔습니다.`);
   });
 });
+
+document.addEventListener("keydown", async (event) => {
+  const shortcut = formatShortcutEvent(event);
+  if (!shortcut) return;
+
+  if (event.target.id === "shortcut-key") {
+    event.preventDefault();
+    setProject((project) => {
+      project.shortcut = shortcut;
+    });
+    return;
+  }
+
+  if (isEditableTarget(event.target)) return;
+
+  const project = getProject();
+  if (!project.shortcut || shortcut !== project.shortcut) return;
+
+  event.preventDefault();
+  await runShortcutFlow();
+});
+
+function isEditableTarget(target) {
+  const tagName = target?.tagName?.toLowerCase();
+  return tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable;
+}
+
+function formatShortcutEvent(event) {
+  if (event.isComposing || event.key === "Process") return "";
+
+  const parts = [];
+  if (event.ctrlKey) parts.push("Ctrl");
+  if (event.altKey) parts.push("Alt");
+  if (event.shiftKey) parts.push("Shift");
+  if (event.metaKey) parts.push("Meta");
+
+  const key = normalizeShortcutKey(event.key);
+  if (!key || ["Control", "Alt", "Shift", "Meta"].includes(key)) return "";
+  parts.push(key);
+  if (parts.length < 2 && !/^F\d{1,2}$/.test(key)) return "";
+  return parts.join("+");
+}
+
+function normalizeShortcutKey(key) {
+  if (!key) return "";
+  if (key === " ") return "Space";
+  if (key.length === 1) return key.toUpperCase();
+  return key;
+}
 
 render();
 connectBridge();
