@@ -293,16 +293,15 @@ function createDesktopLoginSessionId() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function openDesktopLoginPage(sessionId) {
-  const url = `${desktopLoginBaseUrl}/desktop-login.html?session=${encodeURIComponent(sessionId)}`;
+async function openExternalUrl(url, context = "external page") {
   const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
 
   if (invoke) {
     try {
       await invoke("open_external_url", { url });
-      return;
+      return true;
     } catch (error) {
-      console.warn("Falling back to window.open for desktop login", error);
+      console.warn(`Falling back to window.open for ${context}`, error);
     }
   }
 
@@ -310,6 +309,12 @@ async function openDesktopLoginPage(sessionId) {
   if (!opened) {
     location.href = url;
   }
+  return true;
+}
+
+async function openDesktopLoginPage(sessionId) {
+  const url = `${desktopLoginBaseUrl}/desktop-login.html?session=${encodeURIComponent(sessionId)}`;
+  await openExternalUrl(url, "desktop login");
 }
 
 async function signInWithDesktopBridge() {
@@ -517,7 +522,7 @@ function buildCheckoutUrl(planId) {
   return url.toString();
 }
 
-function startPaidPlanCheckout(planId) {
+async function startPaidPlanCheckout(planId) {
   if (!isPaymentConfigured()) {
     const project = getProject();
     addLog(project, "error", "나이스페이 결제 서버 URL 설정이 필요합니다. src/payment-config.js를 확인하세요.");
@@ -525,7 +530,7 @@ function startPaidPlanCheckout(planId) {
     return false;
   }
 
-  window.open(buildCheckoutUrl(planId), "_blank", "noopener,noreferrer");
+  await openExternalUrl(buildCheckoutUrl(planId), "checkout");
   return true;
 }
 
@@ -1438,7 +1443,7 @@ document.addEventListener("click", async (event) => {
     }
 
     if (nextPlan !== "free") {
-      const opened = startPaidPlanCheckout(nextPlan);
+      const opened = await startPaidPlanCheckout(nextPlan);
       if (opened) {
         const activeProject = getProject();
         addLog(activeProject, "info", `${plans[nextPlan].name} 나이스페이 결제 페이지를 열었습니다.`);

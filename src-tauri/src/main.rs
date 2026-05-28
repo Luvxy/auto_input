@@ -20,14 +20,15 @@ fn main() {
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://auto-web-8f2de.web.app/desktop-login.html?session=") {
+    if !is_allowed_external_url(&url) {
         return Err("External URL is not allowed".to_string());
     }
 
     #[cfg(target_os = "windows")]
     {
+        let quoted_url = format!("\"{}\"", url);
         Command::new("cmd")
-            .args(["/C", "start", "", &url])
+            .args(["/C", "start", "", &quoted_url])
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
@@ -50,6 +51,13 @@ fn open_external_url(url: String) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         return Ok(());
     }
+}
+
+fn is_allowed_external_url(url: &str) -> bool {
+    url.starts_with("https://auto-web-8f2de.web.app/desktop-login.html?session=")
+        || url.starts_with("https://auto-web-8f2de.web.app/checkout?")
+        || url == "https://auto-web-8f2de.web.app/payment-success.html"
+        || url == "https://auto-web-8f2de.web.app/payment-fail.html"
 }
 
 fn start_bridge_server() {
