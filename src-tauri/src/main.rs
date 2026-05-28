@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use futures_util::{SinkExt, StreamExt};
 use std::{net::SocketAddr, process::Command, thread};
 use tokio::{
