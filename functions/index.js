@@ -9,8 +9,8 @@ const nicepaySecretKey = defineSecret("NICEPAY_SECRET_KEY");
 
 const REGION = "asia-northeast3";
 const PUBLIC_BASE_URL = "https://auto-web-8f2de.web.app";
-const NICEPAY_CLIENT_KEY = "R2_b4be71ab9b6d4955882b0fe7e94d0761";
-const NICEPAY_API_BASE = "https://api.nicepay.co.kr";
+const NICEPAY_CLIENT_KEY = "S2_48ed0303bf6b4a0292be00b50eafc3e7";
+const NICEPAY_API_BASE = "https://sandbox-api.nicepay.co.kr";
 
 const plans = {
   pro: {
