@@ -26,9 +26,8 @@ fn open_external_url(url: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let quoted_url = format!("\"{}\"", url);
-        Command::new("cmd")
-            .args(["/C", "start", "", &quoted_url])
+        Command::new("explorer")
+            .arg(&url)
             .spawn()
             .map_err(|error| error.to_string())?;
         return Ok(());
