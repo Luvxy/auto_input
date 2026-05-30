@@ -79,6 +79,7 @@ let currentView = "builder";
 let bridgeSocket;
 let bridgeReconnectTimer;
 let globalShortcutListening = false;
+let globalShortcutSignature = "";
 let bridgeState = {
   connected: false,
   lastMessage: "Waiting for extension"
@@ -635,8 +636,15 @@ async function registerGlobalShortcuts() {
   if (!invoke) return;
 
   const shortcuts = [...new Set(getRegisteredShortcutFlows().map(({ flow }) => flow.shortcut))];
+  const signature = shortcuts.join("|");
   try {
     await invoke("update_global_shortcuts", { shortcuts });
+    const project = getProject();
+    if (shortcuts.length && signature !== globalShortcutSignature) {
+      addLog(project, "info", `전역 단축키 ${shortcuts.length}개를 등록했습니다.`);
+      refreshLogs(project);
+    }
+    globalShortcutSignature = signature;
   } catch (error) {
     const project = getProject();
     addLog(project, "error", `전역 단축키 등록 실패: ${error?.message || error}`);
@@ -647,13 +655,23 @@ async function registerGlobalShortcuts() {
 async function initGlobalShortcutBridge() {
   if (globalShortcutListening) return;
   const listen = getTauriListen();
-  if (!listen) return;
+  if (!listen) {
+    addLog(getProject(), "info", "전역 단축키는 설치된 PC 앱에서만 작동합니다.");
+    refreshLogs(getProject());
+    return;
+  }
 
   globalShortcutListening = true;
-  await listen("global-shortcut", async (event) => {
-    await handleShortcutTrigger(event.payload);
-  });
-  await registerGlobalShortcuts();
+  try {
+    await listen("global-shortcut", async (event) => {
+      await handleShortcutTrigger(event.payload);
+    });
+    await registerGlobalShortcuts();
+  } catch (error) {
+    globalShortcutListening = false;
+    addLog(getProject(), "error", `전역 단축키 연결 실패: ${error?.message || error}`);
+    refreshLogs(getProject());
+  }
 }
 
 async function handleShortcutTrigger(shortcut) {
@@ -2072,8 +2090,6 @@ document.addEventListener("keydown", async (event) => {
     });
     return;
   }
-
-  if (isEditableTarget(event.target)) return;
 
   const project = getProject();
   if (!isShortcutMode(project)) return;

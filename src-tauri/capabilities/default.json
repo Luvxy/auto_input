@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default permissions for Auto Input",
   "windows": ["main"],
-  "permissions": []
+  "permissions": ["core:event:allow-listen"]
 }
