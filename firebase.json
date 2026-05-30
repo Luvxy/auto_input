@@ -45,6 +45,13 @@
           "functionId": "desktopLicense",
           "region": "asia-northeast3"
         }
+      },
+      {
+        "source": "/start-trial",
+        "function": {
+          "functionId": "startTrial",
+          "region": "asia-northeast3"
+        }
       }
     ]
   }

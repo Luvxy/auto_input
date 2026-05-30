@@ -31,6 +31,7 @@ const plans = {
 
 const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
 const APP_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -258,8 +259,60 @@ async function getLicenseForUid(uid) {
   return {
     plan: license.plan || "free",
     status: license.status || "active",
-    expiresAt: license.expiresAt?.toDate?.().toISOString?.() || ""
+    expiresAt: license.expiresAt?.toDate?.().toISOString?.() || "",
+    trialStartedAt: license.trialStartedAt?.toDate?.().toISOString?.() || "",
+    trialEndsAt: license.trialEndsAt?.toDate?.().toISOString?.() || ""
   };
+}
+
+async function getActiveAppSession(token) {
+  if (!isValidSessionId(token)) {
+    throw new Error("Invalid app session");
+  }
+
+  const sessionRef = admin.firestore().collection("desktopAppSessions").doc(token);
+  const snapshot = await sessionRef.get();
+  if (!snapshot.exists) {
+    throw new Error("App session not found");
+  }
+
+  const session = snapshot.data();
+  const expiresAt = session.expiresAt?.toDate?.() || new Date(0);
+  if (expiresAt.getTime() < Date.now()) {
+    await sessionRef.delete();
+    throw new Error("App session expired");
+  }
+
+  return session;
+}
+
+async function startTrialForUid(uid) {
+  const licenseRef = admin.firestore().collection("licenses").doc(uid);
+  const now = new Date();
+  const trialEndsAt = new Date(now.getTime() + TRIAL_DURATION_MS);
+
+  await admin.firestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(licenseRef);
+    const license = snapshot.exists ? snapshot.data() : {};
+    if (license.trialStartedAt || license.trialEndsAt) {
+      throw new Error("Trial already used");
+    }
+
+    transaction.set(
+      licenseRef,
+      {
+        plan: license.plan || "free",
+        status: "active",
+        trialStartedAt: admin.firestore.Timestamp.fromDate(now),
+        trialEndsAt: admin.firestore.Timestamp.fromDate(trialEndsAt),
+        createdAt: license.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  });
+
+  return getLicenseForUid(uid);
 }
 
 exports.desktopLoginComplete = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
@@ -401,4 +454,26 @@ exports.desktopLicense = onRequest({ region: REGION, invoker: "public" }, async 
       photoURL: session.photoURL || ""
     }
   });
+});
+
+exports.startTrial = onRequest({ region: REGION, invoker: "public" }, async (req, res) => {
+  setCors(res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "POST") {
+    res.status(405).json({ ok: false, error: "Method Not Allowed" });
+    return;
+  }
+
+  try {
+    const body = req.body || {};
+    const session = await getActiveAppSession(String(body.token || ""));
+    const license = await startTrialForUid(session.uid);
+    res.status(200).json({ ok: true, license });
+  } catch (error) {
+    const code = error.message === "Trial already used" ? 409 : 400;
+    res.status(code).json({ ok: false, error: error.message });
+  }
 });

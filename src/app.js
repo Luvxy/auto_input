@@ -3,6 +3,7 @@ const desktopSessionStorageKey = "web-automation-pc-mvp-desktop-session";
 const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
 const desktopLoginTimeoutMs = 120000;
 const desktopLoginPollMs = 2000;
+const trialDurationMs = 7 * 24 * 60 * 60 * 1000;
 
 const plans = {
   free: {
@@ -99,17 +100,18 @@ let firebaseState = {
 function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) {
-    return { plan: "free", projects: [sampleProject] };
+    return { plan: "free", trial: {}, projects: [sampleProject] };
   }
 
   try {
     const parsed = JSON.parse(saved);
     return {
       plan: parsed.plan || "free",
+      trial: parsed.trial || {},
       projects: parsed.projects?.length ? parsed.projects.map(normalizeProject) : [normalizeProject(sampleProject)]
     };
   } catch {
-    return { plan: "free", projects: [normalizeProject(sampleProject)] };
+    return { plan: "free", trial: {}, projects: [normalizeProject(sampleProject)] };
   }
 }
 
@@ -439,11 +441,20 @@ function applyDesktopLoginResult(result) {
 }
 
 function applyLicense(license) {
+  applyTrialFromLicense(license);
   if (!license || license.status !== "active" || !plans[license.plan] || isLicenseExpired(license)) {
     state.plan = "free";
     return;
   }
   state.plan = license.plan;
+}
+
+function applyTrialFromLicense(license) {
+  if (!license?.trialEndsAt) return;
+  state.trial = {
+    startedAt: normalizeDateValue(license.trialStartedAt)?.toISOString?.() || state.trial?.startedAt || "",
+    endsAt: normalizeDateValue(license.trialEndsAt)?.toISOString?.() || ""
+  };
 }
 
 async function restoreDesktopSession() {
@@ -492,6 +503,7 @@ async function syncLicenseFromFirebase(uid = firebaseState.uid) {
   }
 
   const license = snapshot.data();
+  applyTrialFromLicense(license);
   if (license.status === "active" && plans[license.plan] && !isLicenseExpired(license)) {
     state.plan = license.plan;
     saveState();
@@ -506,10 +518,16 @@ async function syncLicenseFromFirebase(uid = firebaseState.uid) {
 
 function isLicenseExpired(license) {
   if (!license.expiresAt) return false;
-  const expiresAt = typeof license.expiresAt.toDate === "function"
-    ? license.expiresAt.toDate()
-    : new Date(license.expiresAt);
+  const expiresAt = normalizeDateValue(license.expiresAt);
   return Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now();
+}
+
+function normalizeDateValue(value) {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate();
+  if (value.seconds) return new Date(value.seconds * 1000);
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 async function saveLicenseToFirebase(planId) {
@@ -530,12 +548,105 @@ async function saveLicenseToFirebase(planId) {
   );
 }
 
+async function startFreeTrial() {
+  if (!firebaseState.connected || !firebaseState.uid) {
+    addLog(getProject(), "error", "무료체험은 Google 로그인 후 시작할 수 있습니다.");
+    refreshLogs(getProject());
+    return;
+  }
+
+  if (isTrialActive()) {
+    addLog(getProject(), "info", `이미 무료체험이 진행 중입니다. ${trialDaysLeft()}일 남았습니다.`);
+    refreshLogs(getProject());
+    return;
+  }
+
+  if (hasTrialStarted()) {
+    addLog(getProject(), "error", "무료체험은 계정당 1회만 사용할 수 있습니다.");
+    refreshLogs(getProject());
+    return;
+  }
+
+  if (firebaseState.appSessionToken && (!window.firebase || !firebase.auth().currentUser)) {
+    const response = await fetch(`${desktopLoginBaseUrl}/start-trial`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: firebaseState.appSessionToken })
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      addLog(getProject(), "error", `무료체험 시작 실패: ${result.error || response.status}`);
+      refreshLogs(getProject());
+      return;
+    }
+    applyLicense(result.license);
+    saveState();
+    addLog(getProject(), "success", "7일 무료체험을 시작했습니다. 프로젝트 제한이 해제됩니다.");
+    render();
+    return;
+  }
+
+  const now = new Date();
+  const endsAt = new Date(now.getTime() + trialDurationMs);
+  await firebase.firestore().collection("licenses").doc(firebaseState.uid).set(
+    {
+      plan: state.plan || "free",
+      status: "active",
+      trialStartedAt: firebase.firestore.Timestamp.fromDate(now),
+      trialEndsAt: firebase.firestore.Timestamp.fromDate(endsAt),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    },
+    { merge: true }
+  );
+  state.trial = {
+    startedAt: now.toISOString(),
+    endsAt: endsAt.toISOString()
+  };
+  saveState();
+  addLog(getProject(), "success", "7일 무료체험을 시작했습니다. 프로젝트 제한이 해제됩니다.");
+  render();
+}
+
 function getProject() {
   return state.projects.find((project) => project.id === selectedProjectId) || state.projects[0];
 }
 
 function getCurrentPlan() {
+  if (isTrialEffective()) {
+    return {
+      ...plans.pro,
+      id: "trial",
+      name: "Free Trial",
+      price: "7일 무료",
+      description: "7일 동안 프로젝트 무제한"
+    };
+  }
   return plans[state.plan] || plans.free;
+}
+
+function isTrialActive() {
+  const endsAt = normalizeDateValue(state.trial?.endsAt);
+  return Boolean(endsAt && endsAt.getTime() > Date.now());
+}
+
+function isTrialEffective() {
+  return isTrialActive() && (!state.plan || state.plan === "free");
+}
+
+function hasTrialStarted() {
+  return Boolean(state.trial?.startedAt || state.trial?.endsAt);
+}
+
+function trialDaysLeft() {
+  const endsAt = normalizeDateValue(state.trial?.endsAt);
+  if (!endsAt) return 0;
+  return Math.max(0, Math.ceil((endsAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
+function trialStatusText() {
+  if (isTrialActive()) return `무료체험 ${trialDaysLeft()}일 남음`;
+  if (hasTrialStarted()) return "무료체험 종료";
+  return "무료체험 미사용";
 }
 
 function canCreateProject() {
@@ -1008,6 +1119,7 @@ function renderHelpPage() {
 
 function renderPricingPage() {
   const currentPlan = getCurrentPlan();
+  const canStartTrial = firebaseState.connected && !hasTrialStarted();
 
   return `
     <section class="pricing-page">
@@ -1020,6 +1132,7 @@ function renderPricingPage() {
           <span>현재 플랜</span>
           <strong>${currentPlan.name}</strong>
           <small>프로젝트 ${projectLimitText()}</small>
+          <small>${trialStatusText()}</small>
         </div>
       </header>
 
@@ -1033,11 +1146,15 @@ function renderPricingPage() {
           <ul>
             <li>${firebaseState.message}</li>
             <li>${firebaseState.connected ? escapeHtml(accountLabel()) : "Google 로그인을 하면 라이선스를 확인합니다."}</li>
+            <li>${trialStatusText()}</li>
             <li>결제 연동 후 서버가 이 계정의 라이선스 문서를 갱신하면 됩니다.</li>
           </ul>
           <div class="account-actions">
             <button class="${firebaseState.connected ? "" : "primary"}" data-action="${firebaseState.connected ? "sync-license" : "google-login"}">
               ${firebaseState.connected ? "라이선스 새로고침" : "Google 로그인"}
+            </button>
+            <button class="${canStartTrial ? "primary" : ""}" data-action="${firebaseState.connected ? "start-trial" : "google-login"}" ${firebaseState.connected && hasTrialStarted() ? "disabled" : ""}>
+              ${isTrialActive() ? "무료체험 사용 중" : hasTrialStarted() ? "무료체험 종료" : "7일 무료체험"}
             </button>
             ${firebaseState.connected ? `<button data-action="google-logout">로그아웃</button>` : ""}
           </div>
@@ -1864,6 +1981,10 @@ document.addEventListener("click", async (event) => {
 
   if (action === "google-logout") {
     await signOutGoogle();
+  }
+
+  if (action === "start-trial") {
+    await startFreeTrial();
   }
 
   if (action === "select-plan") {
