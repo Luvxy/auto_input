@@ -56,7 +56,9 @@ const sampleProject = {
     }
   ],
   steps: [],
+  executionMode: "automation",
   shortcut: "",
+  shortcutAutoAdvance: true,
   nextRowIndex: 0,
   data: {
     columns: ["name", "phone"],
@@ -110,7 +112,9 @@ function loadState() {
 function normalizeProject(project) {
   return {
     ...project,
+    executionMode: project.executionMode === "shortcut" ? "shortcut" : "automation",
     shortcut: project.shortcut || "",
+    shortcutAutoAdvance: project.shortcutAutoAdvance !== false,
     nextRowIndex: Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0
   };
 }
@@ -551,10 +555,16 @@ function setProject(mutator) {
   render();
 }
 
+function isShortcutMode(project) {
+  return project.executionMode === "shortcut";
+}
+
 function syncProjectForm(project) {
   const nameInput = document.querySelector("#project-name");
   const targetInput = document.querySelector("#target-url");
+  const executionModeInput = document.querySelector("#execution-mode");
   const shortcutInput = document.querySelector("#shortcut-key");
+  const shortcutAutoAdvanceInput = document.querySelector("#shortcut-auto-advance");
 
   if (nameInput) {
     project.name = nameInput.value.trim() || "이름 없는 프로젝트";
@@ -564,8 +574,16 @@ function syncProjectForm(project) {
     project.targetUrl = normalizeTargetUrl(targetInput.value);
   }
 
+  if (executionModeInput) {
+    project.executionMode = executionModeInput.value === "shortcut" ? "shortcut" : "automation";
+  }
+
   if (shortcutInput) {
     project.shortcut = shortcutInput.value.trim();
+  }
+
+  if (shortcutAutoAdvanceInput) {
+    project.shortcutAutoAdvance = shortcutAutoAdvanceInput.checked;
   }
 
   saveState();
@@ -733,7 +751,9 @@ function createExampleProject() {
       { id: crypto.randomUUID(), type: "input", targetId: phoneMappingId, valueSource: "column", column: "phone" },
       { id: crypto.randomUUID(), type: "click", targetId: saveMappingId }
     ],
+    executionMode: "shortcut",
     shortcut: "Ctrl+Alt+1",
+    shortcutAutoAdvance: true,
     nextRowIndex: 0,
     data: {
       columns: ["name", "phone"],
@@ -921,8 +941,12 @@ function render() {
           </div>
           <div class="toolbar">
             <button data-action="save-project">저장</button>
-            <button data-action="test-run">테스트 실행</button>
-            <button class="primary" data-action="run-all">전체 실행</button>
+            ${isShortcutMode(project)
+              ? `<button class="primary" data-action="run-shortcut-flow">현재 행 실행</button>`
+              : `
+                <button data-action="test-run">테스트 실행</button>
+                <button class="primary" data-action="run-all">전체 실행</button>
+              `}
           </div>
         </header>
 
@@ -942,6 +966,22 @@ function render() {
               <div class="field">
                 <label for="target-url">대상 사이트 URL</label>
                 <input id="target-url" value="${escapeHtml(project.targetUrl)}" />
+              </div>
+              <div class="inline-fields">
+                <div class="field">
+                  <label for="execution-mode">실행 방식</label>
+                  <select id="execution-mode">
+                    <option value="automation" ${!isShortcutMode(project) ? "selected" : ""}>자동화</option>
+                    <option value="shortcut" ${isShortcutMode(project) ? "selected" : ""}>단축키</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="shortcut-auto-advance">단축키 데이터 이동</label>
+                  <label class="checkbox-field ${!isShortcutMode(project) ? "muted" : ""}">
+                    <input id="shortcut-auto-advance" type="checkbox" ${project.shortcutAutoAdvance !== false ? "checked" : ""} ${!isShortcutMode(project) ? "disabled" : ""} />
+                    실행이 끝나면 다음 데이터 준비
+                  </label>
+                </div>
               </div>
               <div class="row-actions">
                 <button data-action="add-sample-mapping">샘플 매핑 추가</button>
@@ -1045,7 +1085,7 @@ function render() {
 
           <section class="panel run-panel">
             ${renderDemoPanel(project)}
-            ${renderShortcutPanel(project)}
+            ${isShortcutMode(project) ? renderShortcutPanel(project) : ""}
             <div class="panel-header">
               <div>
                 <h3>데이터</h3>
@@ -1108,12 +1148,15 @@ function renderShortcutPanel(project) {
   const index = getDisplayRowIndex(project);
   const row = rows[index] || {};
   const completed = rows.length > 0 && project.nextRowIndex >= rows.length;
+  const advanceLabel = project.shortcutAutoAdvance !== false
+    ? "실행 후 다음 데이터로 이동"
+    : "실행 후 같은 데이터 유지";
 
   return `
     <div class="panel-header">
       <div>
         <h3>단축키 실행</h3>
-        <span>단축키를 누를 때마다 현재 행 1개를 실행하고 다음 데이터로 이동</span>
+        <span>${advanceLabel}</span>
       </div>
       <button class="primary" data-action="run-shortcut-flow">현재 행 실행</button>
     </div>
@@ -1368,6 +1411,12 @@ async function runAutomation(limitToFirstRow = false) {
   const rows = project.data?.rows || [];
   const targetRows = limitToFirstRow ? rows.slice(0, 1) : rows;
 
+  if (isShortcutMode(project)) {
+    addLog(project, "info", "이 프로젝트는 단축키 모드입니다. 현재 행 실행 또는 등록한 단축키로 실행하세요.");
+    refreshLogs(project);
+    return;
+  }
+
   if (!project.steps.length) {
     addLog(project, "error", "실행할 자동화 단계가 없습니다.");
     refreshLogs(project);
@@ -1432,6 +1481,12 @@ async function runShortcutFlow() {
   syncProjectForm(project);
   const rows = project.data?.rows || [];
 
+  if (!isShortcutMode(project)) {
+    addLog(project, "info", "이 프로젝트는 자동화 모드입니다. 테스트 실행 또는 전체 실행을 사용하세요.");
+    refreshLogs(project);
+    return;
+  }
+
   if (!project.steps.length) {
     addLog(project, "error", "단축키로 실행할 자동화 단계가 없습니다.");
     refreshLogs(project);
@@ -1467,8 +1522,12 @@ async function runShortcutFlow() {
     });
 
     if (!sent) return;
-    advanceShortcutRow(project, 1);
-    addLog(project, "success", `다음 데이터 준비: ${Math.min(project.nextRowIndex + 1, rows.length)} / ${rows.length}행`);
+    if (project.shortcutAutoAdvance !== false) {
+      advanceShortcutRow(project, 1);
+      addLog(project, "success", `다음 데이터 준비: ${Math.min(project.nextRowIndex + 1, rows.length)} / ${rows.length}행`);
+    } else {
+      addLog(project, "success", `${rowIndex + 1}행 실행 요청 완료. 같은 데이터를 유지합니다.`);
+    }
     saveState();
     refreshLogs(project);
     render();
@@ -1479,8 +1538,12 @@ async function runShortcutFlow() {
     await runDemoStep(project, step, row);
   }
 
-  advanceShortcutRow(project, 1);
-  addLog(project, "success", `${rowIndex + 1}행 실행 완료. 다음 데이터를 준비했습니다.`);
+  if (project.shortcutAutoAdvance !== false) {
+    advanceShortcutRow(project, 1);
+    addLog(project, "success", `${rowIndex + 1}행 실행 완료. 다음 데이터를 준비했습니다.`);
+  } else {
+    addLog(project, "success", `${rowIndex + 1}행 실행 완료. 같은 데이터를 유지합니다.`);
+  }
   saveState();
   refreshLogs(project);
   render();
@@ -1537,7 +1600,9 @@ document.addEventListener("click", async (event) => {
       targetUrl: "",
       mappings: [],
       steps: [],
+      executionMode: "automation",
       shortcut: "",
+      shortcutAutoAdvance: true,
       nextRowIndex: 0,
       data: { columns: [], rows: [] },
       logs: []
@@ -1759,10 +1824,12 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (event.target.id === "target-url") {
+  if (["target-url", "execution-mode", "shortcut-auto-advance"].includes(event.target.id)) {
     const project = getProject();
     syncProjectForm(project);
-    addLog(project, "info", "대상 URL을 적용했습니다.");
+    if (event.target.id === "target-url") {
+      addLog(project, "info", "대상 URL을 적용했습니다.");
+    }
     saveState();
     render();
     return;
@@ -1803,7 +1870,7 @@ document.addEventListener("keydown", async (event) => {
   if (isEditableTarget(event.target)) return;
 
   const project = getProject();
-  if (!project.shortcut || shortcut !== project.shortcut) return;
+  if (!isShortcutMode(project) || !project.shortcut || shortcut !== project.shortcut) return;
 
   event.preventDefault();
   await runShortcutFlow();
