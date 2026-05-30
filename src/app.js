@@ -59,6 +59,7 @@ const sampleProject = {
   executionMode: "automation",
   shortcut: "",
   shortcutAutoAdvance: true,
+  shortcutFlows: [],
   nextRowIndex: 0,
   data: {
     columns: ["name", "phone"],
@@ -73,9 +74,11 @@ const sampleProject = {
 let state = loadState();
 let selectedProjectId = state.projects[0]?.id;
 let selectedMappingId = state.projects[0]?.mappings[0]?.id;
+let selectedShortcutFlowId = state.projects[0]?.shortcutFlows?.[0]?.id;
 let currentView = "builder";
 let bridgeSocket;
 let bridgeReconnectTimer;
+let globalShortcutListening = false;
 let bridgeState = {
   connected: false,
   lastMessage: "Waiting for extension"
@@ -110,17 +113,51 @@ function loadState() {
 }
 
 function normalizeProject(project) {
+  const executionMode = project.executionMode === "shortcut" ? "shortcut" : "automation";
   return {
     ...project,
-    executionMode: project.executionMode === "shortcut" ? "shortcut" : "automation",
+    executionMode,
+    steps: Array.isArray(project.steps) ? project.steps : [],
     shortcut: project.shortcut || "",
     shortcutAutoAdvance: project.shortcutAutoAdvance !== false,
+    shortcutFlows: normalizeShortcutFlows(project),
     nextRowIndex: Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0
   };
 }
 
+function normalizeShortcutFlows(project) {
+  const existing = Array.isArray(project.shortcutFlows) ? project.shortcutFlows : [];
+  const migrated = existing.length
+    ? existing
+    : project.shortcut || project.executionMode === "shortcut"
+      ? [{
+          id: crypto.randomUUID(),
+          name: "단축키 1",
+          shortcut: project.shortcut || "",
+          steps: Array.isArray(project.steps) ? [...project.steps] : [],
+          autoAdvance: project.shortcutAutoAdvance !== false,
+          nextRowIndex: Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0
+        }]
+      : [];
+
+  return Array.from({ length: 3 }, (_, index) => {
+    const flow = migrated[index] || {};
+    return {
+      id: flow.id || crypto.randomUUID(),
+      name: flow.name || `단축키 ${index + 1}`,
+      shortcut: flow.shortcut || "",
+      steps: Array.isArray(flow.steps) ? flow.steps : [],
+      autoAdvance: flow.autoAdvance !== false,
+      nextRowIndex: Number.isInteger(flow.nextRowIndex) ? flow.nextRowIndex : 0
+    };
+  });
+}
+
 function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
+  if (globalShortcutListening) {
+    window.setTimeout(registerGlobalShortcuts, 0);
+  }
 }
 
 function isFirebaseConfigured() {
@@ -308,7 +345,7 @@ function createDesktopLoginSessionId() {
 }
 
 async function openExternalUrl(url, context = "external page") {
-  const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+  const invoke = getTauriInvoke();
 
   if (invoke) {
     try {
@@ -559,12 +596,83 @@ function isShortcutMode(project) {
   return project.executionMode === "shortcut";
 }
 
+function getShortcutFlows(project) {
+  project.shortcutFlows = normalizeShortcutFlows(project);
+  return project.shortcutFlows;
+}
+
+function getSelectedShortcutFlow(project) {
+  const flows = getShortcutFlows(project);
+  let flow = flows.find((item) => item.id === selectedShortcutFlowId);
+  if (!flow) {
+    flow = flows[0];
+    selectedShortcutFlowId = flow?.id;
+  }
+  return flow;
+}
+
+function getEditableSteps(project) {
+  return isShortcutMode(project) ? getSelectedShortcutFlow(project).steps : project.steps;
+}
+
+function getTauriInvoke() {
+  return window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+}
+
+function getTauriListen() {
+  return window.__TAURI__?.event?.listen;
+}
+
+function getRegisteredShortcutFlows() {
+  return state.projects
+    .filter((project) => isShortcutMode(project))
+    .flatMap((project) => getShortcutFlows(project).map((flow) => ({ project, flow })))
+    .filter(({ flow }) => flow.shortcut);
+}
+
+async function registerGlobalShortcuts() {
+  const invoke = getTauriInvoke();
+  if (!invoke) return;
+
+  const shortcuts = [...new Set(getRegisteredShortcutFlows().map(({ flow }) => flow.shortcut))];
+  try {
+    await invoke("update_global_shortcuts", { shortcuts });
+  } catch (error) {
+    const project = getProject();
+    addLog(project, "error", `전역 단축키 등록 실패: ${error?.message || error}`);
+    refreshLogs(project);
+  }
+}
+
+async function initGlobalShortcutBridge() {
+  if (globalShortcutListening) return;
+  const listen = getTauriListen();
+  if (!listen) return;
+
+  globalShortcutListening = true;
+  await listen("global-shortcut", async (event) => {
+    await handleShortcutTrigger(event.payload);
+  });
+  await registerGlobalShortcuts();
+}
+
+async function handleShortcutTrigger(shortcut) {
+  const match = getRegisteredShortcutFlows().find(({ flow }) => flow.shortcut === shortcut);
+  if (!match) return;
+  selectedProjectId = match.project.id;
+  selectedShortcutFlowId = match.flow.id;
+  currentView = "builder";
+  await runShortcutFlow(match.flow.id);
+}
+
 function syncProjectForm(project) {
   const nameInput = document.querySelector("#project-name");
   const targetInput = document.querySelector("#target-url");
   const executionModeInput = document.querySelector("#execution-mode");
   const shortcutInput = document.querySelector("#shortcut-key");
   const shortcutAutoAdvanceInput = document.querySelector("#shortcut-auto-advance");
+  const shortcutNameInput = document.querySelector("#shortcut-flow-name");
+  const shortcutFlow = isShortcutMode(project) ? getSelectedShortcutFlow(project) : null;
 
   if (nameInput) {
     project.name = nameInput.value.trim() || "이름 없는 프로젝트";
@@ -579,11 +687,24 @@ function syncProjectForm(project) {
   }
 
   if (shortcutInput) {
-    project.shortcut = shortcutInput.value.trim();
+    const value = shortcutInput.value.trim();
+    if (shortcutFlow) {
+      shortcutFlow.shortcut = value;
+    } else {
+      project.shortcut = value;
+    }
   }
 
   if (shortcutAutoAdvanceInput) {
-    project.shortcutAutoAdvance = shortcutAutoAdvanceInput.checked;
+    if (shortcutFlow) {
+      shortcutFlow.autoAdvance = shortcutAutoAdvanceInput.checked;
+    } else {
+      project.shortcutAutoAdvance = shortcutAutoAdvanceInput.checked;
+    }
+  }
+
+  if (shortcutNameInput && shortcutFlow) {
+    shortcutFlow.name = shortcutNameInput.value.trim() || "단축키 플로우";
   }
 
   saveState();
@@ -754,6 +875,40 @@ function createExampleProject() {
     executionMode: "shortcut",
     shortcut: "Ctrl+Alt+1",
     shortcutAutoAdvance: true,
+    shortcutFlows: [
+      {
+        id: crypto.randomUUID(),
+        name: "고객 저장",
+        shortcut: "Ctrl+Alt+1",
+        steps: [
+          { id: crypto.randomUUID(), type: "input", targetId: nameMappingId, valueSource: "column", column: "name" },
+          { id: crypto.randomUUID(), type: "input", targetId: phoneMappingId, valueSource: "column", column: "phone" },
+          { id: crypto.randomUUID(), type: "click", targetId: saveMappingId }
+        ],
+        autoAdvance: true,
+        nextRowIndex: 0
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "이름만 입력",
+        shortcut: "",
+        steps: [
+          { id: crypto.randomUUID(), type: "input", targetId: nameMappingId, valueSource: "column", column: "name" }
+        ],
+        autoAdvance: false,
+        nextRowIndex: 0
+      },
+      {
+        id: crypto.randomUUID(),
+        name: "전화번호만 입력",
+        shortcut: "",
+        steps: [
+          { id: crypto.randomUUID(), type: "input", targetId: phoneMappingId, valueSource: "column", column: "phone" }
+        ],
+        autoAdvance: false,
+        nextRowIndex: 0
+      }
+    ],
     nextRowIndex: 0,
     data: {
       columns: ["name", "phone"],
@@ -897,6 +1052,8 @@ function render() {
   const project = getProject();
   selectedProjectId = project.id;
   selectedMappingId = selectedMappingId || project.mappings[0]?.id;
+  const shortcutFlow = getSelectedShortcutFlow(project);
+  const editableSteps = getEditableSteps(project);
 
   document.querySelector("#app").innerHTML = `
     <div class="app-shell ${currentView !== "builder" ? "page-mode" : ""}">
@@ -978,7 +1135,7 @@ function render() {
                 <div class="field">
                   <label for="shortcut-auto-advance">단축키 데이터 이동</label>
                   <label class="checkbox-field ${!isShortcutMode(project) ? "muted" : ""}">
-                    <input id="shortcut-auto-advance" type="checkbox" ${project.shortcutAutoAdvance !== false ? "checked" : ""} ${!isShortcutMode(project) ? "disabled" : ""} />
+                    <input id="shortcut-auto-advance" type="checkbox" ${shortcutFlow.autoAdvance !== false ? "checked" : ""} ${!isShortcutMode(project) ? "disabled" : ""} />
                     실행이 끝나면 다음 데이터 준비
                   </label>
                 </div>
@@ -1034,11 +1191,12 @@ function render() {
           <section class="panel">
             <div class="panel-header">
               <div>
-                <h3>자동화 단계</h3>
-                <span>위에서 아래 순서로 실행</span>
+                <h3>${isShortcutMode(project) ? `단축키 플로우: ${escapeHtml(shortcutFlow.name)}` : "자동화 단계"}</h3>
+                <span>${isShortcutMode(project) ? "선택한 단축키 하나에 연결될 실행 순서" : "위에서 아래 순서로 실행"}</span>
               </div>
             </div>
             <div class="panel-body stack">
+              ${isShortcutMode(project) ? renderShortcutFlowTabs(project) : ""}
               <div class="inline-fields">
                 <div class="field">
                   <label for="step-type">단계 타입</label>
@@ -1066,7 +1224,7 @@ function render() {
                 <button data-action="clear-steps">단계 비우기</button>
               </div>
               <div class="step-list">
-                ${project.steps.length ? project.steps.map((step, index) => `
+                ${editableSteps.length ? editableSteps.map((step, index) => `
                   <article class="step-item">
                     <div class="step-number">${index + 1}</div>
                     <div>
@@ -1078,7 +1236,7 @@ function render() {
                     </div>
                     <button class="ghost danger" data-action="remove-step" data-step-id="${step.id}">삭제</button>
                   </article>
-                `).join("") : `<div class="empty-state">아직 자동화 단계가 없습니다.</div>`}
+                `).join("") : `<div class="empty-state">${isShortcutMode(project) ? "선택한 단축키 플로우에 아직 단계가 없습니다." : "아직 자동화 단계가 없습니다."}</div>`}
               </div>
             </div>
           </section>
@@ -1142,13 +1300,28 @@ function renderDataTable(project) {
   `;
 }
 
+function renderShortcutFlowTabs(project) {
+  const flows = getShortcutFlows(project);
+  return `
+    <div class="shortcut-flow-tabs">
+      ${flows.map((flow, index) => `
+        <button class="shortcut-flow-tab ${flow.id === selectedShortcutFlowId ? "active" : ""}" data-action="select-shortcut-flow" data-flow-id="${flow.id}">
+          <span>${escapeHtml(flow.name || `단축키 ${index + 1}`)}</span>
+          <small>${escapeHtml(flow.shortcut || "단축키 미등록")}</small>
+        </button>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderShortcutPanel(project) {
   const rows = project.data?.rows || [];
   const columns = project.data?.columns || [];
-  const index = getDisplayRowIndex(project);
+  const flow = getSelectedShortcutFlow(project);
+  const index = getDisplayRowIndex(project, flow);
   const row = rows[index] || {};
-  const completed = rows.length > 0 && project.nextRowIndex >= rows.length;
-  const advanceLabel = project.shortcutAutoAdvance !== false
+  const completed = rows.length > 0 && flow.nextRowIndex >= rows.length;
+  const advanceLabel = flow.autoAdvance !== false
     ? "실행 후 다음 데이터로 이동"
     : "실행 후 같은 데이터 유지";
 
@@ -1163,12 +1336,22 @@ function renderShortcutPanel(project) {
     <div class="panel-body stack">
       <div class="inline-fields">
         <div class="field">
-          <label for="shortcut-key">단축키</label>
-          <input id="shortcut-key" value="${escapeHtml(project.shortcut || "")}" placeholder="예: Ctrl+Alt+1" readonly />
+          <label for="shortcut-flow-name">플로우 이름</label>
+          <input id="shortcut-flow-name" value="${escapeHtml(flow.name || "")}" placeholder="예: 고객 저장" />
         </div>
+        <div class="field">
+          <label for="shortcut-key">전역 단축키</label>
+          <input id="shortcut-key" value="${escapeHtml(flow.shortcut || "")}" placeholder="예: Ctrl+Alt+1" readonly />
+        </div>
+      </div>
+      <div class="inline-fields">
         <div class="field">
           <label>다음 데이터</label>
           <div class="shortcut-row-indicator">${rows.length ? completed ? "모든 데이터 실행 완료" : `${index + 1} / ${rows.length}행` : "데이터 없음"}</div>
+        </div>
+        <div class="field">
+          <label>백그라운드 실행</label>
+          <div class="shortcut-row-indicator">${flow.shortcut ? "앱이 켜져 있으면 다른 창에서도 작동" : "단축키를 먼저 등록하세요"}</div>
         </div>
       </div>
       <div class="shortcut-preview">
@@ -1307,7 +1490,7 @@ function sendBridgeMessage(message) {
   return true;
 }
 
-function buildRunPayload(project, targetRows) {
+function buildRunPayload(project, targetRows, steps = project.steps) {
   return {
     runId: crypto.randomUUID(),
     projectId: project.id,
@@ -1319,7 +1502,7 @@ function buildRunPayload(project, targetRows) {
       type: mapping.type,
       selector: mapping.selector
     })),
-    steps: project.steps.map((step) => ({
+    steps: steps.map((step) => ({
       id: step.id,
       type: step.type,
       targetId: step.targetId,
@@ -1331,36 +1514,36 @@ function buildRunPayload(project, targetRows) {
   };
 }
 
-function clampNextRowIndex(project) {
+function clampNextRowIndex(project, flow = project) {
   const rows = project.data?.rows || [];
   if (!rows.length) {
-    project.nextRowIndex = 0;
+    flow.nextRowIndex = 0;
     return 0;
   }
 
-  if (!Number.isInteger(project.nextRowIndex)) {
-    project.nextRowIndex = 0;
+  if (!Number.isInteger(flow.nextRowIndex)) {
+    flow.nextRowIndex = 0;
   }
 
-  project.nextRowIndex = Math.min(Math.max(project.nextRowIndex, 0), rows.length - 1);
-  return project.nextRowIndex;
+  flow.nextRowIndex = Math.min(Math.max(flow.nextRowIndex, 0), rows.length - 1);
+  return flow.nextRowIndex;
 }
 
-function getDisplayRowIndex(project) {
+function getDisplayRowIndex(project, flow = project) {
   const rows = project.data?.rows || [];
   if (!rows.length) return 0;
-  if (!Number.isInteger(project.nextRowIndex)) project.nextRowIndex = 0;
-  return Math.min(Math.max(project.nextRowIndex, 0), rows.length - 1);
+  if (!Number.isInteger(flow.nextRowIndex)) flow.nextRowIndex = 0;
+  return Math.min(Math.max(flow.nextRowIndex, 0), rows.length - 1);
 }
 
-function advanceShortcutRow(project, amount) {
+function advanceShortcutRow(project, amount, flow = project) {
   const rows = project.data?.rows || [];
   if (!rows.length) {
-    project.nextRowIndex = 0;
+    flow.nextRowIndex = 0;
     return;
   }
-  const nextIndex = (Number.isInteger(project.nextRowIndex) ? project.nextRowIndex : 0) + amount;
-  project.nextRowIndex = Math.min(Math.max(nextIndex, 0), rows.length);
+  const nextIndex = (Number.isInteger(flow.nextRowIndex) ? flow.nextRowIndex : 0) + amount;
+  flow.nextRowIndex = Math.min(Math.max(nextIndex, 0), rows.length);
 }
 
 function getDemoDocument() {
@@ -1476,10 +1659,12 @@ async function runAutomation(limitToFirstRow = false) {
   refreshLogs(project);
 }
 
-async function runShortcutFlow() {
+async function runShortcutFlow(flowId = selectedShortcutFlowId) {
   const project = getProject();
   syncProjectForm(project);
   const rows = project.data?.rows || [];
+  const flow = getShortcutFlows(project).find((item) => item.id === flowId) || getSelectedShortcutFlow(project);
+  selectedShortcutFlowId = flow.id;
 
   if (!isShortcutMode(project)) {
     addLog(project, "info", "이 프로젝트는 자동화 모드입니다. 테스트 실행 또는 전체 실행을 사용하세요.");
@@ -1487,8 +1672,8 @@ async function runShortcutFlow() {
     return;
   }
 
-  if (!project.steps.length) {
-    addLog(project, "error", "단축키로 실행할 자동화 단계가 없습니다.");
+  if (!flow.steps.length) {
+    addLog(project, "error", "선택한 단축키 플로우에 실행 단계가 없습니다.");
     refreshLogs(project);
     return;
   }
@@ -1499,32 +1684,32 @@ async function runShortcutFlow() {
     return;
   }
 
-  if (!Number.isInteger(project.nextRowIndex)) {
-    project.nextRowIndex = 0;
+  if (!Number.isInteger(flow.nextRowIndex)) {
+    flow.nextRowIndex = 0;
   }
 
-  if (project.nextRowIndex >= rows.length) {
-    addLog(project, "info", "모든 데이터 행을 실행했습니다. 처음 행으로 돌아가 다시 실행할 수 있습니다.");
+  if (flow.nextRowIndex >= rows.length) {
+    addLog(project, "info", `${flow.name}의 모든 데이터 행을 실행했습니다. 처음 행으로 돌아가 다시 실행할 수 있습니다.`);
     refreshLogs(project);
     render();
     return;
   }
 
-  const rowIndex = project.nextRowIndex;
+  const rowIndex = flow.nextRowIndex;
   const row = rows[rowIndex];
-  addLog(project, "info", `단축키 실행: ${rowIndex + 1}행`);
+  addLog(project, "info", `${flow.name} 실행: ${rowIndex + 1}행`);
   refreshLogs(project);
 
   if (!isDemoProject(project)) {
     const sent = sendBridgeMessage({
       type: "automation-run",
-      payload: buildRunPayload(project, [row])
+      payload: buildRunPayload(project, [row], flow.steps)
     });
 
     if (!sent) return;
-    if (project.shortcutAutoAdvance !== false) {
-      advanceShortcutRow(project, 1);
-      addLog(project, "success", `다음 데이터 준비: ${Math.min(project.nextRowIndex + 1, rows.length)} / ${rows.length}행`);
+    if (flow.autoAdvance !== false) {
+      advanceShortcutRow(project, 1, flow);
+      addLog(project, "success", `다음 데이터 준비: ${Math.min(flow.nextRowIndex + 1, rows.length)} / ${rows.length}행`);
     } else {
       addLog(project, "success", `${rowIndex + 1}행 실행 요청 완료. 같은 데이터를 유지합니다.`);
     }
@@ -1534,12 +1719,12 @@ async function runShortcutFlow() {
     return;
   }
 
-  for (const step of project.steps) {
+  for (const step of flow.steps) {
     await runDemoStep(project, step, row);
   }
 
-  if (project.shortcutAutoAdvance !== false) {
-    advanceShortcutRow(project, 1);
+  if (flow.autoAdvance !== false) {
+    advanceShortcutRow(project, 1, flow);
     addLog(project, "success", `${rowIndex + 1}행 실행 완료. 다음 데이터를 준비했습니다.`);
   } else {
     addLog(project, "success", `${rowIndex + 1}행 실행 완료. 같은 데이터를 유지합니다.`);
@@ -1567,7 +1752,14 @@ document.addEventListener("click", async (event) => {
   if (button.dataset.projectId) {
     selectedProjectId = button.dataset.projectId;
     selectedMappingId = getProject().mappings[0]?.id;
+    selectedShortcutFlowId = getSelectedShortcutFlow(getProject())?.id;
     currentView = "builder";
+    render();
+    return;
+  }
+
+  if (action === "select-shortcut-flow") {
+    selectedShortcutFlowId = button.dataset.flowId;
     render();
     return;
   }
@@ -1603,6 +1795,7 @@ document.addEventListener("click", async (event) => {
       executionMode: "automation",
       shortcut: "",
       shortcutAutoAdvance: true,
+      shortcutFlows: normalizeShortcutFlows({ executionMode: "shortcut", steps: [] }),
       nextRowIndex: 0,
       data: { columns: [], rows: [] },
       logs: []
@@ -1629,6 +1822,7 @@ document.addEventListener("click", async (event) => {
     state.projects.push(example);
     selectedProjectId = example.id;
     selectedMappingId = example.mappings[0]?.id;
+    selectedShortcutFlowId = getSelectedShortcutFlow(example)?.id;
     currentView = "builder";
     addLog(example, "success", "예시 자동화를 만들었습니다. 테스트 실행으로 흐름을 확인해보세요.");
     saveState();
@@ -1753,21 +1947,30 @@ document.addEventListener("click", async (event) => {
       step.ms = Number(columnOrValue || 1000);
     }
 
-    project.steps.push(step);
+    getEditableSteps(project).push(step);
     addLog(project, "success", "자동화 단계를 추가했습니다.");
     saveState();
     render();
   }
 
   if (action === "remove-step") {
-    project.steps = project.steps.filter((step) => step.id !== button.dataset.stepId);
+    if (isShortcutMode(project)) {
+      const flow = getSelectedShortcutFlow(project);
+      flow.steps = flow.steps.filter((step) => step.id !== button.dataset.stepId);
+    } else {
+      project.steps = project.steps.filter((step) => step.id !== button.dataset.stepId);
+    }
     addLog(project, "info", "자동화 단계를 삭제했습니다.");
     saveState();
     render();
   }
 
   if (action === "clear-steps") {
-    project.steps = [];
+    if (isShortcutMode(project)) {
+      getSelectedShortcutFlow(project).steps = [];
+    } else {
+      project.steps = [];
+    }
     addLog(project, "info", "자동화 단계를 모두 비웠습니다.");
     saveState();
     render();
@@ -1779,25 +1982,25 @@ document.addEventListener("click", async (event) => {
 
   if (action === "reset-shortcut-row") {
     setProject((activeProject) => {
-      activeProject.nextRowIndex = 0;
+      getSelectedShortcutFlow(activeProject).nextRowIndex = 0;
     });
   }
 
   if (action === "prev-shortcut-row") {
     setProject((activeProject) => {
-      advanceShortcutRow(activeProject, -1);
+      advanceShortcutRow(activeProject, -1, getSelectedShortcutFlow(activeProject));
     });
   }
 
   if (action === "next-shortcut-row") {
     setProject((activeProject) => {
-      advanceShortcutRow(activeProject, 1);
+      advanceShortcutRow(activeProject, 1, getSelectedShortcutFlow(activeProject));
     });
   }
 
   if (action === "clear-shortcut") {
     setProject((activeProject) => {
-      activeProject.shortcut = "";
+      getSelectedShortcutFlow(activeProject).shortcut = "";
     });
   }
 
@@ -1824,7 +2027,7 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", async (event) => {
-  if (["target-url", "execution-mode", "shortcut-auto-advance"].includes(event.target.id)) {
+  if (["target-url", "execution-mode", "shortcut-auto-advance", "shortcut-flow-name"].includes(event.target.id)) {
     const project = getProject();
     syncProjectForm(project);
     if (event.target.id === "target-url") {
@@ -1851,6 +2054,9 @@ document.addEventListener("change", async (event) => {
   setProject((project) => {
     project.data = parseCsv(text);
     project.nextRowIndex = 0;
+    getShortcutFlows(project).forEach((flow) => {
+      flow.nextRowIndex = 0;
+    });
     addLog(project, "success", `${file.name} 파일을 불러왔습니다.`);
   });
 });
@@ -1862,7 +2068,7 @@ document.addEventListener("keydown", async (event) => {
   if (event.target.id === "shortcut-key") {
     event.preventDefault();
     setProject((project) => {
-      project.shortcut = shortcut;
+      getSelectedShortcutFlow(project).shortcut = shortcut;
     });
     return;
   }
@@ -1870,10 +2076,12 @@ document.addEventListener("keydown", async (event) => {
   if (isEditableTarget(event.target)) return;
 
   const project = getProject();
-  if (!isShortcutMode(project) || !project.shortcut || shortcut !== project.shortcut) return;
+  if (!isShortcutMode(project)) return;
+  const flow = getShortcutFlows(project).find((item) => item.shortcut === shortcut);
+  if (!flow) return;
 
   event.preventDefault();
-  await runShortcutFlow();
+  await runShortcutFlow(flow.id);
 });
 
 function isEditableTarget(target) {
@@ -1907,3 +2115,4 @@ function normalizeShortcutKey(key) {
 render();
 connectBridge();
 initFirebase();
+initGlobalShortcutBridge();

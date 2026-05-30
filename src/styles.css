@@ -586,6 +586,33 @@ textarea {
   padding: 12px;
 }
 
+.shortcut-flow-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shortcut-flow-tab {
+  min-height: 58px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+
+.shortcut-flow-tab.active {
+  border-color: var(--accent);
+  background: #eef7f4;
+  color: var(--accent-strong);
+}
+
+.shortcut-flow-tab small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .shortcut-row-indicator {
   min-height: 40px;
   border: 1px solid var(--line);
