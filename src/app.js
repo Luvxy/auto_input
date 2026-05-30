@@ -678,7 +678,6 @@ async function handleShortcutTrigger(shortcut) {
   const match = getRegisteredShortcutFlows().find(({ flow }) => flow.shortcut === shortcut);
   if (!match) return;
   selectedProjectId = match.project.id;
-  selectedShortcutFlowId = match.flow.id;
   currentView = "builder";
   await runShortcutFlow(match.flow.id);
 }
@@ -1679,7 +1678,10 @@ async function runAutomation(limitToFirstRow = false) {
 
 async function runShortcutFlow(flowId = selectedShortcutFlowId) {
   const project = getProject();
-  syncProjectForm(project);
+  const shouldSyncVisibleForm = flowId === selectedShortcutFlowId;
+  if (shouldSyncVisibleForm) {
+    syncProjectForm(project);
+  }
   const rows = project.data?.rows || [];
   const flow = getShortcutFlows(project).find((item) => item.id === flowId) || getSelectedShortcutFlow(project);
   selectedShortcutFlowId = flow.id;
