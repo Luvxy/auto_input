@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>고객 등록 테스트 사이트 - Auto Input</title>
+    <style>
+      :root {
+        --bg: #f4f7f6;
+        --surface: #ffffff;
+        --line: #d9e2df;
+        --text: #17242f;
+        --muted: #657385;
+        --accent: #1f7a66;
+        --accent-soft: #e5f5ef;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+      }
+
+      main {
+        width: min(960px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 28px 0 48px;
+        display: grid;
+        gap: 14px;
+      }
+
+      header,
+      form,
+      section {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      header {
+        padding: 22px;
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+
+      p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      .tag {
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        padding: 7px 10px;
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+        gap: 12px;
+        align-items: end;
+        padding: 18px;
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      input {
+        min-height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+        color: var(--text);
+        font: inherit;
+      }
+
+      button {
+        min-height: 42px;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent);
+        color: #ffffff;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 800;
+        padding: 0 18px;
+      }
+
+      section {
+        padding: 18px;
+      }
+
+      .practice {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .practice div {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #f8fbfa;
+        padding: 12px;
+      }
+
+      .practice strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 10px 8px;
+        text-align: left;
+      }
+
+      th {
+        color: var(--muted);
+        font-weight: 800;
+      }
+
+      .saved-note {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 10px;
+      }
+
+      .flash {
+        animation: flash 520ms ease;
+      }
+
+      @keyframes flash {
+        0% {
+          background: var(--accent-soft);
+          outline: 2px solid var(--accent);
+        }
+        100% {
+          background: #ffffff;
+          outline: 0 solid transparent;
+        }
+      }
+
+      @media (max-width: 760px) {
+        header,
+        form,
+        .practice {
+          grid-template-columns: 1fr;
+        }
+
+        header {
+          display: grid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>고객 등록 테스트 사이트</h1>
+          <p>
+            Auto Input 앱과 크롬 확장프로그램을 연습하기 위한 공개 테스트 페이지입니다.
+            아래 입력창과 저장 버튼을 매핑한 뒤 CSV 데이터로 자동 입력을 실행해보세요.
+          </p>
+        </div>
+        <span class="tag">Practice</span>
+      </header>
+
+      <section class="practice" aria-label="연습 순서">
+        <div>
+          <strong>1. 요소 매핑</strong>
+          <p>확장프로그램 매핑 모드에서 고객명, 전화번호, 저장 버튼을 클릭합니다.</p>
+        </div>
+        <div>
+          <strong>2. 단계 만들기</strong>
+          <p>name 입력, phone 입력, 저장 버튼 클릭 순서로 플로우를 구성합니다.</p>
+        </div>
+        <div>
+          <strong>3. 테스트 실행</strong>
+          <p>앱에서 테스트 실행이나 단축키 실행을 눌러 저장 목록이 채워지는지 확인합니다.</p>
+        </div>
+      </section>
+
+      <form id="customer-form">
+        <label>
+          고객명
+          <input id="customer-name" name="name" placeholder="홍길동" autocomplete="off" />
+        </label>
+        <label>
+          전화번호
+          <input id="customer-phone" name="phone" placeholder="010-0000-0000" autocomplete="off" />
+        </label>
+        <button class="save" type="submit">저장</button>
+      </form>
+
+      <section>
+        <p class="saved-note">저장된 고객</p>
+        <table>
+          <thead>
+            <tr>
+              <th>고객명</th>
+              <th>전화번호</th>
+              <th>등록 시간</th>
+            </tr>
+          </thead>
+          <tbody id="saved-customers"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const form = document.querySelector("#customer-form");
+      const tbody = document.querySelector("#saved-customers");
+
+      function addCustomer(name, phone) {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${escapeHtml(name)}</td><td>${escapeHtml(phone)}</td><td>${new Date().toLocaleTimeString("ko-KR")}</td>`;
+        tbody.prepend(row);
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const name = form.elements.name.value.trim();
+        const phone = form.elements.phone.value.trim();
+        if (!name || !phone) return;
+        addCustomer(name, phone);
+        form.reset();
+      });
+
+      window.demoCustomer = {
+        reset() {
+          form.reset();
+          tbody.innerHTML = "";
+        }
+      };
+    </script>
+  </body>
+</html>

@@ -344,6 +344,61 @@ h1 {
   box-shadow: inset 0 0 0 2px rgba(31, 122, 102, 0.14);
 }
 
+.practice-section {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 0.9fr);
+  gap: 28px;
+  align-items: center;
+}
+
+.practice-copy h2 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.15;
+}
+
+.practice-copy p {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+.practice-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfa;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.practice-panel strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.practice-panel code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+  color: var(--accent-strong);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+}
+
+.practice-panel ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.75;
+}
+
 .download {
   border-top: 1px solid var(--line);
   background: #202832;
@@ -471,6 +526,7 @@ footer {
 @media (max-width: 980px) {
   .hero,
   .intro,
+  .practice-section,
   .download {
     grid-template-columns: 1fr;
   }
