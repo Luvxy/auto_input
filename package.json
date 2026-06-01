@@ -14,5 +14,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "electron": "^31.7.7"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }

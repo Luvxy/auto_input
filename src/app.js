@@ -1381,11 +1381,11 @@ function render() {
             <div class="panel-header">
               <div>
                 <h3>데이터</h3>
-                <span>CSV 첫 줄을 컬럼으로 사용</span>
+                <span>CSV 또는 Excel 첫 행을 컬럼으로 사용</span>
               </div>
             </div>
             <div class="panel-body stack">
-              <input id="csv-file" type="file" accept=".csv,text/csv" />
+              <input id="csv-file" type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
               ${renderDataTable(project)}
             </div>
             <div class="panel-header">
@@ -1584,6 +1584,59 @@ function parseCsv(text) {
   return {
     columns,
     rows: rows.map((cells) =>
+      Object.fromEntries(columns.map((column, index) => [column, cells[index] || ""]))
+    )
+  };
+}
+
+async function parseDataFile(file) {
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  if (["xlsx", "xls"].includes(extension)) {
+    return parseExcelFile(file);
+  }
+
+  return parseCsv(await file.text());
+}
+
+async function parseExcelFile(file) {
+  if (!window.XLSX) {
+    throw new Error("Excel parser is not loaded");
+  }
+
+  const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array" });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) {
+    return { columns: [], rows: [] };
+  }
+
+  const sheet = workbook.Sheets[sheetName];
+  const table = window.XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: "",
+    blankrows: false,
+    raw: false
+  });
+
+  return normalizeTableRows(table);
+}
+
+function normalizeTableRows(table) {
+  const nonEmptyRows = table
+    .map((row) => row.map((cell) => String(cell ?? "").trim()))
+    .filter((row) => row.some(Boolean));
+
+  const header = nonEmptyRows.shift() || [];
+  const columnCounts = new Map();
+  const columns = header.map((value, index) => {
+    const base = value || `column_${index + 1}`;
+    const count = columnCounts.get(base) || 0;
+    columnCounts.set(base, count + 1);
+    return count ? `${base}_${count + 1}` : base;
+  });
+
+  return {
+    columns,
+    rows: nonEmptyRows.map((cells) =>
       Object.fromEntries(columns.map((column, index) => [column, cells[index] || ""]))
     )
   };
@@ -2191,15 +2244,22 @@ document.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
 
-  const text = await file.text();
-  setProject((project) => {
-    project.data = parseCsv(text);
-    project.nextRowIndex = 0;
-    getShortcutFlows(project).forEach((flow) => {
-      flow.nextRowIndex = 0;
+  try {
+    const data = await parseDataFile(file);
+    setProject((project) => {
+      project.data = data;
+      project.nextRowIndex = 0;
+      getShortcutFlows(project).forEach((flow) => {
+        flow.nextRowIndex = 0;
+      });
+      addLog(project, "success", `${file.name} 파일을 불러왔습니다.`);
     });
-    addLog(project, "success", `${file.name} 파일을 불러왔습니다.`);
-  });
+  } catch (error) {
+    const project = getProject();
+    addLog(project, "error", `파일을 불러오지 못했습니다: ${error.message}`);
+    saveState();
+    render();
+  }
 });
 
 document.addEventListener("keydown", async (event) => {
