@@ -1,5 +1,6 @@
 const storageKey = "web-automation-pc-mvp-state";
 const desktopSessionStorageKey = "web-automation-pc-mvp-desktop-session";
+const startupLoginPromptStorageKey = "web-automation-pc-mvp-startup-login-prompted";
 const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
 const desktopLoginTimeoutMs = 120000;
 const desktopLoginPollMs = 2000;
@@ -81,6 +82,7 @@ let bridgeSocket;
 let bridgeReconnectTimer;
 let globalShortcutListening = false;
 let globalShortcutSignature = "";
+let startupLoginPrompting = false;
 let bridgeState = {
   connected: false,
   lastMessage: "Waiting for extension"
@@ -232,6 +234,7 @@ async function initFirebase() {
         state.plan = "free";
         saveState();
         render();
+        promptLoginOnStartup();
         return;
       }
 
@@ -338,6 +341,21 @@ async function signInWithGoogle() {
     };
     render();
   }
+}
+
+function promptLoginOnStartup() {
+  if (startupLoginPrompting || firebaseState.connected || firebaseState.loading) return;
+  if (!isFirebaseConfigured()) return;
+  if (sessionStorage.getItem(startupLoginPromptStorageKey)) return;
+
+  startupLoginPrompting = true;
+  sessionStorage.setItem(startupLoginPromptStorageKey, "1");
+  window.setTimeout(async () => {
+    if (!firebaseState.connected) {
+      await signInWithGoogle();
+    }
+    startupLoginPrompting = false;
+  }, 400);
 }
 
 function createDesktopLoginSessionId() {
