@@ -1,14 +1,22 @@
+if (!window.__AUTO_INPUT_CONTENT_LOADED__) {
+window.__AUTO_INPUT_CONTENT_LOADED__ = true;
+
 let mappingMode = false;
 let hoveredElement = null;
 let previousOutline = "";
 let previousCursor = "";
 let bridgeSocket;
 let reconnectTimer;
-
-connectBridge();
+let bridgeEnabled = false;
+let bridgeEverConnected = false;
+let pendingBridgeMessages = [];
+let currentAutomationRunId = "";
+let stopRequestedRunIds = new Set();
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "start-mapping") {
+    bridgeEnabled = true;
+    connectBridge();
     mappingMode = true;
     document.documentElement.style.cursor = "crosshair";
   }
@@ -167,6 +175,10 @@ function sendMapping(payload) {
 }
 
 function connectBridge() {
+  if (!bridgeEnabled) {
+    return;
+  }
+
   if (bridgeSocket && bridgeSocket.readyState <= WebSocket.OPEN) {
     return;
   }
@@ -174,6 +186,10 @@ function connectBridge() {
   bridgeSocket = new WebSocket("ws://localhost:4173/ws");
 
   bridgeSocket.addEventListener("open", () => {
+    bridgeEverConnected = true;
+    for (const text of pendingBridgeMessages.splice(0)) {
+      bridgeSocket.send(text);
+    }
     sendBridgeMessage({
       type: "extension-ready",
       payload: {
@@ -194,11 +210,29 @@ function connectBridge() {
     if (message.type === "automation-run") {
       await runAutomation(message.payload);
     }
+
+    if (message.type === "automation-stop") {
+      if (message.runId) {
+        stopRequestedRunIds.add(message.runId);
+      }
+      if (message.payload?.runId) {
+        stopRequestedRunIds.add(message.payload.runId);
+      }
+      if (currentAutomationRunId) {
+        stopRequestedRunIds.add(currentAutomationRunId);
+      }
+    }
   });
 
   bridgeSocket.addEventListener("close", () => {
     clearTimeout(reconnectTimer);
-    reconnectTimer = setTimeout(connectBridge, 1200);
+    if (bridgeEnabled && bridgeEverConnected) {
+      reconnectTimer = setTimeout(connectBridge, 3000);
+    }
+  });
+
+  bridgeSocket.addEventListener("error", () => {
+    bridgeSocket?.close();
   });
 }
 
@@ -209,11 +243,12 @@ function sendBridgeMessage(message) {
     return;
   }
 
-  const socket = new WebSocket("ws://localhost:4173/ws");
-  socket.addEventListener("open", () => {
-    socket.send(text);
-    socket.close();
-  });
+  if (!bridgeEnabled) {
+    return;
+  }
+
+  pendingBridgeMessages.push(text);
+  connectBridge();
 }
 
 async function runAutomation(payload = {}) {
@@ -221,6 +256,8 @@ async function runAutomation(payload = {}) {
   const steps = payload.steps || [];
   const mappings = payload.mappings || [];
   const runId = payload.runId || crypto.randomUUID();
+  currentAutomationRunId = runId;
+  stopRequestedRunIds.delete(runId);
 
   sendBridgeMessage({
     type: "automation-status",
@@ -228,7 +265,17 @@ async function runAutomation(payload = {}) {
   });
 
   for (const [rowIndex, row] of rows.entries()) {
+    if (stopRequestedRunIds.has(runId)) {
+      sendStatus(runId, "info", "확장프로그램 실행을 중지했습니다.");
+      break;
+    }
+
     for (const step of steps) {
+      if (stopRequestedRunIds.has(runId)) {
+        sendStatus(runId, "info", "확장프로그램 실행을 중지했습니다.");
+        break;
+      }
+
       const mapping = mappings.find((item) => item.id === step.targetId);
       if (!mapping) {
         sendStatus(runId, "error", `${rowIndex + 1}행: 매핑을 찾을 수 없습니다.`);
@@ -244,10 +291,17 @@ async function runAutomation(payload = {}) {
     }
   }
 
+  if (stopRequestedRunIds.has(runId)) {
+    stopRequestedRunIds.delete(runId);
+    currentAutomationRunId = "";
+    return;
+  }
+
   sendBridgeMessage({
     type: "automation-status",
     payload: { runId, level: "success", message: "확장프로그램 실행 완료" }
   });
+  currentAutomationRunId = "";
 }
 
 async function executeStep(step, mapping, row) {
@@ -338,4 +392,5 @@ function actionLabel(step) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
 }

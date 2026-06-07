@@ -1,7 +1,9 @@
 const storageKey = "web-automation-pc-mvp-state";
 const desktopSessionStorageKey = "web-automation-pc-mvp-desktop-session";
 const startupLoginPromptStorageKey = "web-automation-pc-mvp-startup-login-prompted";
+const onboardingDismissedStorageKey = "web-automation-pc-mvp-onboarding-dismissed";
 const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
+const hostedDemoCustomerUrl = "https://auto-web-8f2de.web.app/demo-customer";
 const desktopLoginTimeoutMs = 120000;
 const desktopLoginPollMs = 2000;
 const trialDurationMs = 7 * 24 * 60 * 60 * 1000;
@@ -78,11 +80,17 @@ let selectedProjectId = state.projects[0]?.id;
 let selectedMappingId = state.projects[0]?.mappings[0]?.id;
 let selectedShortcutFlowId = state.projects[0]?.shortcutFlows?.[0]?.id;
 let currentView = "builder";
+let activeBuilderTab = "target";
 let bridgeSocket;
 let bridgeReconnectTimer;
 let globalShortcutListening = false;
 let globalShortcutSignature = "";
 let startupLoginPrompting = false;
+let activeAutomationRun = {
+  running: false,
+  runId: "",
+  stopRequested: false
+};
 let bridgeState = {
   connected: false,
   lastMessage: "Waiting for extension"
@@ -938,6 +946,16 @@ function receiveMappedElement(payload = {}) {
 function receiveAutomationStatus(payload = {}) {
   const project = getProject();
   addLog(project, payload.level || "info", payload.message || "확장프로그램 상태를 수신했습니다.");
+  const message = String(payload.message || "");
+  if (
+    payload.runId &&
+    payload.runId === activeAutomationRun.runId &&
+    (payload.level === "success" || message.includes("완료") || message.includes("중지"))
+  ) {
+    activeAutomationRun = { running: false, runId: "", stopRequested: false };
+    render();
+    return;
+  }
   refreshLogs(project);
 }
 
@@ -989,7 +1007,7 @@ function createExampleProject() {
   return {
     id: crypto.randomUUID(),
     name: "예시: 고객 등록 자동화",
-    targetUrl: `${location.origin}/demo-customer.html`,
+    targetUrl: hostedDemoCustomerUrl,
     mappings: [
       {
         id: nameMappingId,
@@ -1002,7 +1020,7 @@ function createExampleProject() {
         id: phoneMappingId,
         name: "전화번호 입력창",
         type: "input",
-        selector: "input[name='phone']",
+        selector: "#customer-phone",
         sample: "확장프로그램 예시 | label: 연락처"
       },
       {
@@ -1069,7 +1087,7 @@ function createExampleProject() {
 }
 
 function isDemoProject(project) {
-  return project.targetUrl.includes("/demo-customer.html");
+  return project.targetUrl.startsWith(location.origin) && project.targetUrl.includes("/demo-customer");
 }
 
 function normalizeTargetUrl(value) {
@@ -1200,6 +1218,425 @@ function renderPricingPage() {
   `;
 }
 
+const builderTabs = [
+  { id: "target", label: "대상 페이지", hint: "URL과 연결 상태" },
+  { id: "data", label: "데이터", hint: "CSV/Excel 미리보기" },
+  { id: "mapping", label: "매핑", hint: "입력창과 버튼 연결" },
+  { id: "flow", label: "플로우", hint: "실행 순서 구성" },
+  { id: "run", label: "실행", hint: "테스트와 로그" }
+];
+
+function isOnboardingDismissed() {
+  return localStorage.getItem(onboardingDismissedStorageKey) === "1";
+}
+
+function getProjectProgress(project) {
+  const steps = getEditableSteps(project);
+  const hasSuccessLog = project.logs?.some((log) => log.level === "success") || false;
+
+  return [
+    { id: "target", label: "대상 URL 설정", done: Boolean(project.targetUrl), tab: "target" },
+    { id: "data", label: "데이터 준비", done: Boolean(project.data?.columns?.length && project.data?.rows?.length), tab: "data" },
+    { id: "mapping", label: "웹 요소 매핑", done: Boolean(project.mappings?.length), tab: "mapping" },
+    { id: "flow", label: "플로우 구성", done: Boolean(steps.length), tab: "flow" },
+    { id: "run", label: "첫 테스트 실행", done: hasSuccessLog, tab: "run" }
+  ];
+}
+
+function renderOnboardingBanner(project) {
+  if (isOnboardingDismissed() && !isDemoProject(project)) {
+    return "";
+  }
+
+  const progress = getProjectProgress(project);
+  const doneCount = progress.filter((item) => item.done).length;
+  const isEmptyProject = !project.targetUrl && !project.data?.rows?.length && !project.mappings?.length;
+
+  return `
+    <section class="onboarding-panel">
+      <div class="onboarding-copy">
+        <span class="eyebrow">${isDemoProject(project) ? "예제 온보딩" : "처음 사용자 가이드"}</span>
+        <h3>${isDemoProject(project) ? "고객 등록 자동화를 한 번 실행해보세요" : "5분 안에 첫 자동화를 만들어보세요"}</h3>
+        <p>${isDemoProject(project)
+          ? "테스트 사이트, 예제 데이터, 기본 플로우가 준비되어 있습니다. 실행 탭에서 1건 테스트를 누르면 바로 눈으로 확인할 수 있습니다."
+          : "테스트 고객 등록 사이트와 예제 데이터를 사용하면 매핑부터 실행까지 빠르게 익힐 수 있습니다."}</p>
+        <div class="onboarding-actions">
+          <button class="primary" data-action="create-example-project">${isEmptyProject ? "예제로 시작하기" : "예제 프로젝트 만들기"}</button>
+          <button data-action="show-help">사용법 보기</button>
+          <button class="ghost" data-action="dismiss-onboarding">나중에 보기</button>
+        </div>
+      </div>
+      <div class="onboarding-checklist">
+        <strong>${doneCount} / ${progress.length} 완료</strong>
+        ${progress.map((item) => `
+          <button class="check-item ${item.done ? "done" : ""}" data-action="select-builder-tab" data-tab="${item.tab}">
+            <span>${item.done ? "✓" : ""}</span>
+            ${escapeHtml(item.label)}
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderBuilderTabs() {
+  return `
+    <nav class="builder-tabs" aria-label="프로젝트 설정 단계">
+      ${builderTabs.map((tab) => `
+        <button class="${tab.id === activeBuilderTab ? "active" : ""}" data-action="select-builder-tab" data-tab="${tab.id}">
+          <strong>${tab.label}</strong>
+          <small>${tab.hint}</small>
+        </button>
+      `).join("")}
+    </nav>
+  `;
+}
+
+function renderBuilderWorkspace(project, shortcutFlow, editableSteps) {
+  return `
+    <section class="builder-page">
+      ${renderOnboardingBanner(project)}
+      ${renderBuilderTabs()}
+      <section class="builder-content">
+        ${activeBuilderTab === "target" ? renderTargetTab(project) : ""}
+        ${activeBuilderTab === "data" ? renderDataTab(project) : ""}
+        ${activeBuilderTab === "mapping" ? renderMappingTab(project) : ""}
+        ${activeBuilderTab === "flow" ? renderFlowTab(project, shortcutFlow, editableSteps) : ""}
+        ${activeBuilderTab === "run" ? renderRunTab(project) : ""}
+      </section>
+    </section>
+  `;
+}
+
+function renderTargetTab(project) {
+  return `
+    <section class="tab-layout two-column">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>대상 페이지</h3>
+            <span>자동화를 실행할 웹페이지를 정합니다.</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div class="field">
+            <label for="project-name">프로젝트 이름</label>
+            <input id="project-name" value="${escapeHtml(project.name)}" />
+          </div>
+          <div class="field">
+            <label for="target-url">대상 사이트 URL</label>
+            <input id="target-url" value="${escapeHtml(project.targetUrl)}" placeholder="https://example.com/admin/customers" />
+          </div>
+          <div class="inline-fields">
+            <div class="field">
+              <label for="execution-mode">실행 방식</label>
+              <select id="execution-mode">
+                <option value="automation" ${!isShortcutMode(project) ? "selected" : ""}>자동 실행</option>
+                <option value="shortcut" ${isShortcutMode(project) ? "selected" : ""}>단축키 실행</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>확장프로그램 연결</label>
+              <div class="connection-card ${bridgeState.connected ? "online" : "offline"}">
+                <span class="dot"></span>
+                <strong>${bridgeState.connected ? "연결됨" : "연결 대기 중"}</strong>
+                <small>${escapeHtml(bridgeState.lastMessage)}</small>
+              </div>
+            </div>
+          </div>
+          <div class="row-actions">
+            <button class="primary" data-action="open-target-url" ${project.targetUrl ? "" : "disabled"}>대상 페이지 열기</button>
+            <button data-action="create-example-project">테스트 사이트로 예제 만들기</button>
+            <button class="danger" data-action="delete-project">프로젝트 삭제</button>
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>작업 순서</h3>
+            <span>처음에는 이 순서대로 진행하면 됩니다.</span>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="progress-list">
+            ${getProjectProgress(project).map((item, index) => `
+              <button class="${item.done ? "done" : ""}" data-action="select-builder-tab" data-tab="${item.tab}">
+                <span>${item.done ? "✓" : index + 1}</span>
+                <div>
+                  <strong>${escapeHtml(item.label)}</strong>
+                  <small>${item.done ? "완료됨" : builderTabs.find((tab) => tab.id === item.tab)?.hint || ""}</small>
+                </div>
+              </button>
+            `).join("")}
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderDataTab(project) {
+  const columns = project.data?.columns || [];
+
+  return `
+    <section class="tab-layout two-column">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>데이터</h3>
+            <span>CSV 또는 Excel 첫 행을 컬럼명으로 사용합니다.</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <input id="csv-file" type="file" accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
+          ${columns.length ? `
+            <div class="variable-strip">
+              ${columns.map((column) => `<span>{${escapeHtml(column)}}</span>`).join("")}
+            </div>
+          ` : `
+            <div class="empty-state">엑셀이나 CSV를 불러오면 여기서 컬럼과 미리보기를 확인할 수 있습니다.</div>
+          `}
+          ${renderDataTable(project)}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>사용 팁</h3>
+            <span>플로우에서 컬럼을 값처럼 사용할 수 있습니다.</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div class="guide-box">
+            <strong>예시</strong>
+            <p>이름 입력 단계에서 <code>name</code> 컬럼을 선택하면 각 행의 고객명이 자동으로 입력됩니다.</p>
+          </div>
+          <div class="guide-box">
+            <strong>현재 데이터</strong>
+            <p>${project.data?.rows?.length || 0}개 행, ${columns.length}개 컬럼이 준비되어 있습니다.</p>
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderMappingCards(project) {
+  if (!project.mappings.length) {
+    return `<div class="empty-state">아직 매핑된 요소가 없습니다. 확장프로그램에서 매핑 모드를 켜고 입력창이나 버튼을 클릭하세요.</div>`;
+  }
+
+  return project.mappings.map((mapping) => `
+    <article class="mapping-item ${mapping.id === selectedMappingId ? "active" : ""}" data-mapping-id="${mapping.id}">
+      <div class="item-title">
+        <span>${escapeHtml(mapping.name)}</span>
+        <small>${typeLabel(mapping.type)}</small>
+      </div>
+      <div class="meta">${escapeHtml(mapping.selector)}<br />${escapeHtml(mapping.sample || "")}</div>
+      <button class="ghost danger mapping-delete" data-action="delete-mapping" data-mapping-id="${mapping.id}">삭제</button>
+    </article>
+  `).join("");
+}
+
+function renderMappingTab(project) {
+  return `
+    <section class="tab-layout two-column">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>웹 요소 매핑</h3>
+            <span>확장프로그램에서 매핑 모드를 켠 뒤 웹페이지의 입력창과 버튼을 클릭하세요.</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div class="bridge-hint">
+            확장프로그램 아이콘을 누르고 <strong>매핑 모드 켜기</strong>를 선택하세요. 현재 사이트 권한은 이때만 요청되고, 클릭한 요소가 이 목록에 추가됩니다.
+          </div>
+          <div class="mapping-list">
+            ${renderMappingCards(project)}
+          </div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>수동 등록</h3>
+            <span>필요한 경우 CSS selector로 직접 추가할 수 있습니다.</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          <div class="inline-fields">
+            <div class="field">
+              <label for="mapping-type">타입</label>
+              <select id="mapping-type">
+                <option value="input">입력창</option>
+                <option value="button">버튼</option>
+                <option value="select">선택</option>
+                <option value="checkbox">체크박스</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="mapping-name">이름</label>
+              <input id="mapping-name" placeholder="예: 저장 버튼" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="mapping-selector">CSS selector</label>
+            <input id="mapping-selector" placeholder="예: button.save" />
+          </div>
+          <div class="row-actions">
+            <button data-action="add-mapping">매핑 등록</button>
+            <button data-action="add-sample-mapping">샘플 매핑 추가</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderFlowColumnChips(project) {
+  const columns = project.data?.columns || [];
+  if (!columns.length) {
+    return `
+      <div class="flow-columns empty">
+        <strong>데이터 컬럼</strong>
+        <p>데이터 탭에서 Excel 또는 CSV를 불러오면 플로우 구성에 사용할 컬럼이 여기에 표시됩니다.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="flow-columns">
+      <strong>데이터 컬럼</strong>
+      <div class="flow-column-list">
+        ${columns.map((column) => `
+          <button type="button" data-action="use-flow-column" data-column="${escapeHtml(column)}">{${escapeHtml(column)}}</button>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderFlowTab(project, shortcutFlow, editableSteps) {
+  return `
+    <section class="tab-layout two-column">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>${isShortcutMode(project) ? `단축키 플로우: ${escapeHtml(shortcutFlow.name)}` : "자동 실행 플로우"}</h3>
+            <span>${selectedMappingId ? `${escapeHtml(mappingName(project, selectedMappingId))} 선택됨` : "왼쪽에서 매핑 대상을 선택하세요."}</span>
+          </div>
+        </div>
+        <div class="panel-body stack">
+          ${isShortcutMode(project) ? renderShortcutFlowTabs(project) : ""}
+          <div class="inline-fields">
+            <div class="field">
+              <label for="step-type">단계 타입</label>
+              <select id="step-type">
+                <option value="input">값 입력</option>
+                <option value="click">버튼 클릭</option>
+                <option value="wait">대기</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="step-column">데이터 컬럼 또는 값</label>
+              <input id="step-column" placeholder="예: name 또는 1000" />
+            </div>
+          </div>
+          <div class="field">
+            <label for="step-target">대상 매핑</label>
+            <select id="step-target">
+              ${project.mappings.map((mapping) => `
+                <option value="${mapping.id}" ${mapping.id === selectedMappingId ? "selected" : ""}>${escapeHtml(mapping.name)}</option>
+              `).join("")}
+            </select>
+          </div>
+          <div class="row-actions">
+            <button data-action="add-step">단계 추가</button>
+            <button data-action="clear-steps">단계 비우기</button>
+          </div>
+          ${renderFlowColumnChips(project)}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>실행 순서</h3>
+            <span>${editableSteps.length}개 단계</span>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="step-list">
+            ${editableSteps.length ? editableSteps.map((step, index) => `
+              <article class="step-item">
+                <div class="step-number">${index + 1}</div>
+                <div>
+                  <div class="item-title">
+                    <span>${escapeHtml(stepLabel(step))}</span>
+                    <span class="badge ${step.type}">${escapeHtml(step.type)}</span>
+                  </div>
+                  <div class="meta">대상: ${escapeHtml(mappingName(project, step.targetId))}</div>
+                </div>
+                <button class="ghost danger" data-action="remove-step" data-step-id="${step.id}">삭제</button>
+              </article>
+            `).join("") : `<div class="empty-state">아직 실행 단계가 없습니다. 왼쪽에서 입력/클릭 단계를 추가하세요.</div>`}
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderRunTab(project) {
+  return `
+    <section class="tab-layout two-column run-tab">
+      <section class="stack">
+        ${renderDemoPanel(project)}
+        ${isShortcutMode(project) ? renderShortcutPanel(project) : ""}
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>실행</h3>
+              <span>${isShortcutMode(project) ? "단축키 또는 현재 행 실행" : "1건 테스트 후 전체 실행"}</span>
+            </div>
+          </div>
+          <div class="panel-body stack">
+            ${isShortcutMode(project) ? `
+              <button class="primary" data-action="run-shortcut-flow">현재 행 실행</button>
+            ` : `
+              <div class="row-actions">
+                <button data-action="test-run">1건 테스트 실행</button>
+                <button class="primary" data-action="run-all">전체 데이터 실행</button>
+                ${activeAutomationRun.running ? `<button class="danger" data-action="stop-run">중지</button>` : ""}
+              </div>
+            `}
+          </div>
+        </section>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>실행 로그</h3>
+            <span data-log-count>${project.logs.length}개 이벤트</span>
+          </div>
+          <button data-action="clear-logs">비우기</button>
+        </div>
+        <div class="panel-body">
+          <div class="log-list">
+            ${project.logs.length ? project.logs.map((log) => `
+              <div class="log-item">
+                <span class="log-time">${escapeHtml(log.time)}</span>
+                <span class="log-${log.level}">${escapeHtml(log.message)}</span>
+              </div>
+            `).join("") : `<div class="empty-state">실행하면 로그가 여기에 표시됩니다.</div>`}
+          </div>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function render() {
   const project = getProject();
   selectedProjectId = project.id;
@@ -1256,10 +1693,12 @@ function render() {
                 <button data-action="test-run">테스트 실행</button>
                 <button class="primary" data-action="run-all">전체 실행</button>
               `}
+            ${activeAutomationRun.running ? `<button class="danger" data-action="stop-run">중지</button>` : ""}
           </div>
         </header>
 
-        <section class="workspace">
+        ${renderBuilderWorkspace(project, shortcutFlow, editableSteps)}
+        <section class="workspace legacy-workspace">
           <section class="panel">
             <div class="panel-header">
               <div>
@@ -1695,9 +2134,9 @@ function sendBridgeMessage(message) {
   return true;
 }
 
-function buildRunPayload(project, targetRows, steps = project.steps) {
+function buildRunPayload(project, targetRows, steps = project.steps, runId = crypto.randomUUID()) {
   return {
-    runId: crypto.randomUUID(),
+    runId,
     projectId: project.id,
     targetUrl: project.targetUrl,
     rows: targetRows,
@@ -1794,10 +2233,17 @@ async function runDemoStep(project, step, row) {
 }
 
 async function runAutomation(limitToFirstRow = false) {
+  if (activeAutomationRun.running) {
+    addLog(getProject(), "info", "이미 실행 중입니다. 먼저 중지하거나 완료될 때까지 기다려주세요.");
+    refreshLogs(getProject());
+    return;
+  }
+
   const project = getProject();
   syncProjectForm(project);
   const rows = project.data?.rows || [];
   const targetRows = limitToFirstRow ? rows.slice(0, 1) : rows;
+  const runId = crypto.randomUUID();
 
   if (isShortcutMode(project)) {
     addLog(project, "info", "이 프로젝트는 단축키 모드입니다. 현재 행 실행 또는 등록한 단축키로 실행하세요.");
@@ -1824,22 +2270,38 @@ async function runAutomation(limitToFirstRow = false) {
   addLog(project, "info", `${limitToFirstRow ? "테스트" : "전체"} 실행 시작: ${targetRows.length}행`);
   refreshLogs(project);
 
+  activeAutomationRun = { running: true, runId, stopRequested: false };
+  render();
+
   if (!isDemoProject(project)) {
     const sent = sendBridgeMessage({
       type: "automation-run",
-      payload: buildRunPayload(project, targetRows)
+      payload: buildRunPayload(project, targetRows, project.steps, runId)
     });
 
     if (sent) {
       addLog(project, "info", "확장프로그램으로 실제 웹페이지 실행 명령을 보냈습니다.");
       refreshLogs(project);
+    } else {
+      activeAutomationRun = { running: false, runId: "", stopRequested: false };
+      render();
     }
 
     return;
   }
 
   for (const [rowIndex, row] of targetRows.entries()) {
+    if (activeAutomationRun.stopRequested || activeAutomationRun.runId !== runId) {
+      addLog(project, "info", "실행을 중지했습니다.");
+      break;
+    }
+
     for (const step of project.steps) {
+      if (activeAutomationRun.stopRequested || activeAutomationRun.runId !== runId) {
+        addLog(project, "info", "실행을 중지했습니다.");
+        break;
+      }
+
       const target = mappingName(project, step.targetId);
 
       if (isDemoProject(project)) {
@@ -1860,8 +2322,12 @@ async function runAutomation(limitToFirstRow = false) {
     }
   }
 
-  addLog(project, "success", "실행 완료");
+  if (!activeAutomationRun.stopRequested && activeAutomationRun.runId === runId) {
+    addLog(project, "success", "실행 완료");
+  }
+  activeAutomationRun = { running: false, runId: "", stopRequested: false };
   refreshLogs(project);
+  render();
 }
 
 async function runShortcutFlow(flowId = selectedShortcutFlowId) {
@@ -1946,7 +2412,7 @@ document.addEventListener("click", async (event) => {
   const button = event.target.closest("button");
   const mappingItem = event.target.closest(".mapping-item");
 
-  if (mappingItem) {
+  if (mappingItem && button?.dataset.action !== "delete-mapping") {
     selectedMappingId = mappingItem.dataset.mappingId;
     render();
     return;
@@ -1968,6 +2434,18 @@ document.addEventListener("click", async (event) => {
 
   if (action === "select-shortcut-flow") {
     selectedShortcutFlowId = button.dataset.flowId;
+    render();
+    return;
+  }
+
+  if (action === "select-builder-tab") {
+    activeBuilderTab = button.dataset.tab || "target";
+    render();
+    return;
+  }
+
+  if (action === "dismiss-onboarding") {
+    localStorage.setItem(onboardingDismissedStorageKey, "1");
     render();
     return;
   }
@@ -2011,6 +2489,7 @@ document.addEventListener("click", async (event) => {
     state.projects.push(next);
     selectedProjectId = next.id;
     selectedMappingId = undefined;
+    activeBuilderTab = "target";
     currentView = "builder";
     saveState();
     render();
@@ -2031,10 +2510,21 @@ document.addEventListener("click", async (event) => {
     selectedProjectId = example.id;
     selectedMappingId = example.mappings[0]?.id;
     selectedShortcutFlowId = getSelectedShortcutFlow(example)?.id;
+    activeBuilderTab = "run";
     currentView = "builder";
     addLog(example, "success", "예시 자동화를 만들었습니다. 테스트 실행으로 흐름을 확인해보세요.");
     saveState();
     render();
+  }
+
+  if (action === "open-target-url") {
+    syncProjectForm(project);
+    if (project.targetUrl) {
+      await openExternalUrl(project.targetUrl, "target page");
+      addLog(project, "info", "대상 페이지를 열었습니다.");
+      saveState();
+      render();
+    }
   }
 
   if (action === "sync-license") {
@@ -2144,6 +2634,34 @@ document.addEventListener("click", async (event) => {
     render();
   }
 
+  if (action === "delete-mapping") {
+    const mappingId = button.dataset.mappingId;
+    const mapping = project.mappings.find((item) => item.id === mappingId);
+    if (!mapping) return;
+
+    project.mappings = project.mappings.filter((item) => item.id !== mappingId);
+    project.steps = project.steps.filter((step) => step.targetId !== mappingId);
+    getShortcutFlows(project).forEach((flow) => {
+      flow.steps = flow.steps.filter((step) => step.targetId !== mappingId);
+    });
+
+    if (selectedMappingId === mappingId) {
+      selectedMappingId = project.mappings[0]?.id;
+    }
+
+    addLog(project, "info", `${mapping.name} 매핑을 삭제했습니다.`);
+    saveState();
+    render();
+  }
+
+  if (action === "use-flow-column") {
+    const stepColumnInput = document.querySelector("#step-column");
+    if (stepColumnInput) {
+      stepColumnInput.value = button.dataset.column || "";
+      stepColumnInput.focus();
+    }
+  }
+
   if (action === "add-step") {
     const type = document.querySelector("#step-type").value;
     const targetId = document.querySelector("#step-target").value;
@@ -2190,6 +2708,18 @@ document.addEventListener("click", async (event) => {
 
   if (action === "run-shortcut-flow") {
     await runShortcutFlow();
+  }
+
+  if (action === "stop-run") {
+    if (!activeAutomationRun.running) return;
+    const runId = activeAutomationRun.runId;
+    activeAutomationRun = { running: false, runId: "", stopRequested: true };
+    if (!isDemoProject(project)) {
+      sendBridgeMessage({ type: "automation-stop", runId, payload: { runId } });
+    }
+    addLog(project, "info", "실행 중지를 요청했습니다.");
+    refreshLogs(project);
+    render();
   }
 
   if (action === "reset-shortcut-row") {

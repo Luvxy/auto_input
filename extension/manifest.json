@@ -1,19 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "웹 자동화 매핑 도구 MVP",
+  "name": "Auto Input",
   "version": "0.1.0",
-  "description": "웹 요소를 선택해 PC 앱 MVP로 보내는 크롬 확장프로그램 프로토타입입니다.",
+  "description": "웹 입력창과 버튼을 PC 앱에 연결해 반복 입력 업무를 자동화합니다.",
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["<all_urls>", "http://localhost:4173/*", "ws://localhost:4173/*"],
+  "optional_host_permissions": ["<all_urls>"],
   "action": {
-    "default_title": "자동화 매핑",
+    "default_title": "Auto Input",
     "default_popup": "popup.html"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
 }
