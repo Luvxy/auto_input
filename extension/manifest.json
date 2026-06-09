@@ -3,7 +3,7 @@
   "name": "Auto Input",
   "version": "0.1.0",
   "description": "웹 입력창과 버튼을 PC 앱에 연결해 반복 입력 업무를 자동화합니다.",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting"],
   "optional_host_permissions": ["<all_urls>"],
   "action": {
     "default_title": "Auto Input",
