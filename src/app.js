@@ -4,6 +4,7 @@ const startupLoginPromptStorageKey = "web-automation-pc-mvp-startup-login-prompt
 const onboardingDismissedStorageKey = "web-automation-pc-mvp-onboarding-dismissed";
 const desktopLoginBaseUrl = "https://auto-web-8f2de.web.app";
 const hostedDemoCustomerUrl = "https://auto-web-8f2de.web.app/demo-customer";
+const chromeWebStoreUrl = "https://chromewebstore.google.com/detail/auto-input/bamccmkdddcfeiibebjiknnbgniggdbp?hl=ko";
 const desktopLoginTimeoutMs = 120000;
 const desktopLoginPollMs = 2000;
 const trialDurationMs = 7 * 24 * 60 * 60 * 1000;
@@ -1114,12 +1115,13 @@ function renderHelpPage() {
           <h3>기본 사용법</h3>
           <ol>
             <li>새 프로젝트를 만들고 대상 사이트 URL을 적습니다.</li>
-            <li>크롬 확장프로그램에서 매핑 모드를 켭니다.</li>
+            <li>Chrome Web Store에서 Auto Input 확장프로그램을 설치하고 매핑 모드를 켭니다.</li>
             <li>웹페이지의 입력창, 버튼, 선택 요소를 클릭해 PC 앱으로 보냅니다.</li>
             <li>CSV 데이터를 불러오고 컬럼을 확인합니다.</li>
             <li>값 입력, 버튼 클릭, 대기 단계를 순서대로 추가합니다.</li>
             <li>테스트 실행으로 첫 번째 행만 확인한 뒤 전체 실행합니다.</li>
           </ol>
+          <button data-action="open-extension-store">Chrome Web Store에서 설치</button>
         </article>
 
         <article class="help-card">
@@ -1451,7 +1453,8 @@ function renderMappingTab(project) {
         </div>
         <div class="panel-body stack">
           <div class="bridge-hint">
-            확장프로그램 아이콘을 누르고 <strong>매핑 모드 켜기</strong>를 선택하세요. 현재 사이트 권한은 이때만 요청되고, 클릭한 요소가 이 목록에 추가됩니다.
+            Chrome Web Store에서 Auto Input 확장프로그램을 설치한 뒤, 확장프로그램 아이콘을 누르고 <strong>매핑 모드 켜기</strong>를 선택하세요. 현재 사이트 권한은 이때만 요청되고, 클릭한 요소가 이 목록에 추가됩니다.
+            <button data-action="open-extension-store">확장프로그램 설치</button>
           </div>
           <div class="mapping-list">
             ${renderMappingCards(project)}
@@ -1744,7 +1747,7 @@ function render() {
               </div>
             </div>
             <div class="panel-body stack">
-              <div class="bridge-hint">크롬 확장프로그램에서 매핑 모드를 켠 뒤 웹페이지의 입력창이나 버튼을 클릭하면 여기에 자동으로 추가됩니다.</div>
+              <div class="bridge-hint">Chrome Web Store에서 Auto Input 확장프로그램을 설치한 뒤 매핑 모드를 켜세요. 웹페이지의 입력창이나 버튼을 클릭하면 여기에 자동으로 추가됩니다. <button data-action="open-extension-store">확장프로그램 설치</button></div>
               <div class="inline-fields">
                 <div class="field">
                   <label for="mapping-type">타입</label>
@@ -2525,6 +2528,11 @@ document.addEventListener("click", async (event) => {
       saveState();
       render();
     }
+  }
+
+  if (action === "open-extension-store") {
+    await openExternalUrl(chromeWebStoreUrl, "Chrome Web Store");
+    return;
   }
 
   if (action === "sync-license") {
