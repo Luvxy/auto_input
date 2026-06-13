@@ -16,16 +16,14 @@ const plans = {
   pro: {
     id: "pro",
     name: "Auto Input Pro",
-    amount: 4900,
-    licensePlan: "pro",
-    months: 1
+    amount: 8900,
+    licensePlan: "pro"
   },
   business: {
     id: "business",
     name: "Auto Input Business",
     amount: 29000,
-    licensePlan: "business",
-    months: 1
+    licensePlan: "business"
   }
 };
 
@@ -56,12 +54,6 @@ function parseBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
   const raw = req.rawBody ? req.rawBody.toString("utf8") : "";
   return Object.fromEntries(new URLSearchParams(raw));
-}
-
-function addMonths(date, months) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
 }
 
 function renderPage({ title, body }) {
@@ -126,7 +118,7 @@ exports.checkout = onRequest({ region: REGION, invoker: "public" }, async (req, 
   const failUrl = `${PUBLIC_BASE_URL}/payment-fail.html`;
   const body = `
     <h1>${escapeHtml(plan.name)} 결제</h1>
-    <p>결제 완료 후 Auto Input 앱에서 라이선스 새로고침을 누르면 플랜이 반영됩니다.</p>
+    <p>최초 1회 결제 후 Auto Input 앱에서 라이선스 새로고침을 누르면 플랜이 반영됩니다.</p>
     <dl>
       <div class="row"><dt>플랜</dt><dd>${escapeHtml(plan.name)}</dd></div>
       <div class="row"><dt>금액</dt><dd>${plan.amount.toLocaleString("ko-KR")}원</dd></div>
@@ -205,8 +197,6 @@ exports.nicepayReturn = onRequest({ region: REGION, invoker: "public", secrets: 
     }
 
     const plan = plans[order.plan];
-    const now = new Date();
-    const expiresAt = addMonths(now, plan.months);
 
     await admin.firestore().runTransaction(async (transaction) => {
       transaction.update(orderRef, {
@@ -224,7 +214,7 @@ exports.nicepayReturn = onRequest({ region: REGION, invoker: "public", secrets: 
         orderId,
         tid,
         paidAmount: amount,
-        expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+        expiresAt: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     });

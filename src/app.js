@@ -20,14 +20,14 @@ const plans = {
   pro: {
     id: "pro",
     name: "Pro",
-    price: "월 4,900원",
+    price: "1회 8,900원",
     projectLimit: Infinity,
-    description: "프로젝트 무제한 개인 플랜"
+    description: "한 번 결제하고 계속 쓰는 개인 플랜"
   },
   business: {
     id: "business",
     name: "Business",
-    price: "월 29,000원",
+    price: "1회 29,000원",
     projectLimit: Infinity,
     description: "백업, 예약 실행, 우선 지원을 위한 업무용 플랜"
   }
@@ -1164,7 +1164,7 @@ function renderPricingPage() {
       <header class="help-hero">
         <div>
           <h2>요금제</h2>
-          <p>무료로 2개 프로젝트까지 써보고, 더 필요하면 월 4,900원으로 프로젝트를 무제한으로 늘릴 수 있습니다.</p>
+          <p>무료로 2개 프로젝트까지 써보고, 더 필요하면 1회 8,900원 결제로 프로젝트를 무제한으로 늘릴 수 있습니다.</p>
         </div>
         <div class="current-plan-box">
           <span>현재 플랜</span>

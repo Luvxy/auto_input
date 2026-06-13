@@ -85,7 +85,7 @@ window.paymentConfig = {
 권장 결제 흐름:
 
 1. 앱에서 Google 로그인
-2. Pro 또는 Business 결제 클릭
+2. Pro 또는 Business 1회 결제 클릭
 3. 결제 서버로 `plan`, `uid`, `email` 전달
 4. 결제 서버에서 나이스페이 결제창 생성
 5. 결제 성공 후 서버가 Firestore `licenses/{uid}`를 갱신
